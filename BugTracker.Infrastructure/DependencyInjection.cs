@@ -1,10 +1,14 @@
 ﻿using BugTracker.Application.Interfaces;
 using BugTracker.Application.Interfaces.Repositories;
+using BugTracker.Application.Interfaces.Services;
+using BugTracker.Application.Services;
 using BugTracker.Infrastructure.Persistence;
 using BugTracker.Infrastructure.Persistence.Repositories;
+using BugTracker.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+
 
 namespace BugTracker.Infrastructure;
 
@@ -28,6 +32,9 @@ public static class DependencyInjection
         services.AddScoped<IAttachmentRepository, AttachmentRepository>();
         services.AddScoped<IActivityLogRepository, ActivityLogRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
+        services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();
+        services.AddScoped<IUserService, UserService>();
+
 
         services.AddScoped<IUnitOfWork, UnitOfWork>();
 
