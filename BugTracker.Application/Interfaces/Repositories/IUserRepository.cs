@@ -1,4 +1,5 @@
-﻿using BugTracker.Domain.Entities;
+﻿using BugTracker.Application.DTOs.Users;
+using BugTracker.Domain.Entities;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -13,8 +14,10 @@ namespace BugTracker.Application.Interfaces.Repositories
 
         Task<User?> GetByUsernameAsync(string username);
 
-        Task<bool> IsEmailUniqueAsync(string email);
+        Task<bool> IsEmailUniqueAsync(string email, Guid? excludeUserId = null);
 
         Task<IEnumerable<User>> GetActiveUsersAsync();
+
+        Task<(IEnumerable<User> Items, int TotalCount)> GetPaginatedAsync(UserFilterDto filter);
     }
 }
