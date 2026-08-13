@@ -1,4 +1,5 @@
-﻿using BugTracker.Domain.Entities;
+﻿using BugTracker.Application.DTOs.Projects;
+using BugTracker.Domain.Entities;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -11,9 +12,13 @@ namespace BugTracker.Application.Interfaces.Repositories
     {
         Task<Project?> GetByKeyAsync(string key);
 
+        Task<Project?> GetByIdWithMembersAsync(Guid projectId);
         Task<IEnumerable<Project>> GetByOwnerIdAsync(Guid ownerId);
 
         Task<IEnumerable<Project>> GetActiveProjectsAsync();
+
+        Task<(IEnumerable<Project> Items, int TotalCount)> GetPaginatedAsync(
+           ProjectFilterDto filter,Guid userId, bool isAdmin);
 
         Task<bool> IsKeyUniqueAsync(string key);
     }
