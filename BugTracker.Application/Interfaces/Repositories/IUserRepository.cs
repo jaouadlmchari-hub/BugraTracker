@@ -19,5 +19,7 @@ namespace BugTracker.Application.Interfaces.Repositories
         Task<IEnumerable<User>> GetActiveUsersAsync();
 
         Task<(IEnumerable<User> Items, int TotalCount)> GetPaginatedAsync(UserFilterDto filter);
+
+    
     }
 }
