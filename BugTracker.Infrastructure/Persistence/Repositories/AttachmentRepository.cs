@@ -15,11 +15,24 @@ namespace BugTracker.Infrastructure.Persistence.Repositories
         {
         }
 
+        public async Task<int> CountByIssueIdAsync(Guid issueId)
+        {
+            return await _context.Attachments
+                .CountAsync(a => a.IssueId == issueId);
+        }
+
         public async Task<IEnumerable<Attachment>> GetByIssueIdAsync(Guid issueId)
         {
             return await _dbSet
                          .Where(a => a.IssueId == issueId)
                          .ToListAsync();
+        }
+
+        public async Task<Attachment?> GetByIdWithDetailsAsync(Guid attachmentId)
+        {
+            return await _context.Attachments
+                .Include(a => a.Issue)
+                .FirstOrDefaultAsync(a => a.Id == attachmentId);
         }
 
         public async Task<IEnumerable<Attachment>> GetByUploaderIdAsync(Guid projectId, Guid uploaderId)
