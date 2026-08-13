@@ -10,7 +10,11 @@ namespace BugTracker.Application.Interfaces.Repositories
 
     public interface IAttachmentRepository : IRepository<Attachment>
     {
+        Task<int> CountByIssueIdAsync(Guid issueId);
+
         Task<IEnumerable<Attachment>> GetByIssueIdAsync(Guid issueId);
+
+        Task<Attachment?> GetByIdWithDetailsAsync(Guid attachmentId);
 
         Task<IEnumerable<Attachment>> GetByUploaderIdAsync(Guid projectId, Guid uploaderId);
     }
