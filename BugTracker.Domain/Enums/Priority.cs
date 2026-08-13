@@ -11,6 +11,6 @@ namespace BugTracker.Domain.Enums
         Low,
         Medium,
         High,
-        Urgent
+        Critical
     }
 }
