@@ -19,5 +19,7 @@ namespace BugTracker.Application.Interfaces.Repositories
         Task<IEnumerable<ProjectMember>> GetByRoleAsync(Guid projectId, ProjectRole role);
 
         Task<bool> IsMemberAsync(Guid projectId, Guid userId);
+
+        Task<int> CountManagersAsync(Guid projectId);
     }
 }
