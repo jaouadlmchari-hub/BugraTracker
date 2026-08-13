@@ -23,8 +23,9 @@ namespace BugTracker.Infrastructure.Persistence.Repositories
         public async Task<IEnumerable<ProjectMember>> GetByProjectIdAsync(Guid projectId)
         {
             return await _dbSet
-                         .Where(pm => pm.ProjectId == projectId)
-                         .ToListAsync();
+                      .Include(pm => pm.User)
+                      .Where(pm => pm.ProjectId == projectId)
+                      .ToListAsync();
         }
 
 
@@ -46,6 +47,12 @@ namespace BugTracker.Infrastructure.Persistence.Repositories
         {
             return await _dbSet
                          .AnyAsync(pm => pm.ProjectId == projectId && pm.UserId==userId);
+        }
+
+        public async Task<int> CountManagersAsync(Guid projectId)
+        {
+            return await _dbSet
+                .CountAsync(m => m.ProjectId == projectId && m.Role == ProjectRole.Manager);
         }
 
     }
