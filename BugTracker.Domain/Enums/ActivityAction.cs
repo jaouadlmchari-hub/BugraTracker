@@ -16,6 +16,7 @@ namespace BugTracker.Domain.Enums
         Assigned,
         SprintChanged,
         Commented,
+        CommentDeleted,
         AttachmentAdded,
         AttachmentRemoved
     }
