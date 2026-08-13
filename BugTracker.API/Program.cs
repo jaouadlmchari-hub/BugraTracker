@@ -1,6 +1,6 @@
+using BugTracker.Application;
 using BugTracker.Infrastructure;
-using BugTracker.Infrastructure.Persistence;
-using Microsoft.EntityFrameworkCore;
+
 
 namespace BugTracker.API
 {
@@ -10,7 +10,7 @@ namespace BugTracker.API
         {
             var builder = WebApplication.CreateBuilder(args);
 
-
+            builder.Services.AddApplication();
             builder.Services.AddInfrastructure(builder.Configuration);
 
             // Add services to the container.
