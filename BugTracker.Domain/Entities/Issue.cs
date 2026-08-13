@@ -14,7 +14,7 @@ namespace BugTracker.Domain.Entities
     {
 
         public string Title { get; set; } = string.Empty;
-        public string Description { get; set; } = string.Empty;
+        public string? Description { get; set; } 
 
         // Enums
         public IssueType Type { get; set; }     // Bug, Feature, Task
