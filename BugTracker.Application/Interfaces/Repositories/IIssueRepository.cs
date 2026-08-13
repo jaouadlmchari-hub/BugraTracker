@@ -12,7 +12,9 @@ namespace BugTracker.Application.Interfaces.Repositories
     {
         Task<IEnumerable<Issue>> GetByProjectIdAsync(Guid projectId);
 
-        Task<IEnumerable<Issue>> GetBySrpintIdAsync(Guid srpintId);
+        Task<Issue?> GetByIdWithDetailsAsync(Guid issueId);
+
+        Task<IEnumerable<Issue>> GetBySprintIdAsync(Guid sprintId);
 
         Task<IEnumerable<Issue>> GetByAssigneeIdAsync(Guid assigneeId);
 
@@ -21,6 +23,10 @@ namespace BugTracker.Application.Interfaces.Repositories
         Task<IEnumerable<Issue>> GetByStatusAsync(Guid projectId, IssueStatus status);
 
         Task<IEnumerable<Issue>> GetByPriorityAsync(Guid projectId, Priority priority);
+
+        Task<IEnumerable<Issue>> GetByProjectAndAssigneeAsync(Guid projectId, Guid userId);
+
+        Task<IEnumerable<Issue>> GetUnfinishedBySprintIdAsync(Guid sprintId);
 
     }
 }
