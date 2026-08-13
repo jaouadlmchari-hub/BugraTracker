@@ -28,6 +28,7 @@ namespace BugTracker.Infrastructure.Persistence.Repositories
                                      s.Status == SprintStatus.Active)
                          .ToListAsync();
         }
+
         public async Task<Sprint?> GetByNameAsync(Guid projectId , string name)
         {
             return await _dbSet
