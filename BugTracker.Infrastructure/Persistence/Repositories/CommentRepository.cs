@@ -15,6 +15,16 @@ namespace BugTracker.Infrastructure.Persistence.Repositories
                          .ToListAsync();
         }
 
+        public async Task<Comment?> GetByIdWithDetailsAsync(Guid commentId)
+        {
+            return await _dbSet
+                         .Include(c => c.Issue)
+                         .Where(c => c.Id == commentId)
+                         .FirstOrDefaultAsync();
+                        
+                         
+        }
+
         public async Task<IEnumerable<Comment>> GetByUserIdAsync(Guid projectId, Guid userId)
         {
            return await _dbSet
