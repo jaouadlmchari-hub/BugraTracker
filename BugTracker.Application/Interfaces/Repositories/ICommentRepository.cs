@@ -11,6 +11,8 @@ namespace BugTracker.Application.Interfaces.Repositories
     {
         Task<IEnumerable<Comment>> GetByIssueIdAsync(Guid issueId);
 
+        Task<Comment?> GetByIdWithDetailsAsync(Guid commentId);
+
         Task<IEnumerable<Comment>> GetByUserIdAsync(Guid projectId, Guid userId);
     }
 }
