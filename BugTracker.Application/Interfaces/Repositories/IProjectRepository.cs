@@ -17,6 +17,8 @@ namespace BugTracker.Application.Interfaces.Repositories
 
         Task<IEnumerable<Project>> GetActiveProjectsAsync();
 
+        Task<bool> ExistsAsync(Guid projectId);
+
         Task<(IEnumerable<Project> Items, int TotalCount)> GetPaginatedAsync(
            ProjectFilterDto filter,Guid userId, bool isAdmin);
 
