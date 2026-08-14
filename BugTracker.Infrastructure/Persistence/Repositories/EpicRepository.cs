@@ -20,6 +20,7 @@ namespace BugTracker.Infrastructure.Persistence.Repositories
                          .Where(e => e.ProjectId == projectId)
                          .ToListAsync();
         }
+
         public async Task<IEnumerable<Epic>> GetActiveEpicsAsync(Guid projectId)
         {
             return await _dbSet
@@ -32,6 +33,13 @@ namespace BugTracker.Infrastructure.Persistence.Repositories
         {
             return await _dbSet
                          .FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Title == title);
+        }
+
+        public async Task<Epic?> GetByIdWithDetailsAsync(Guid epicId)
+        {
+            return await _context.Epics
+                .Include(e => e.Issues)
+                .FirstOrDefaultAsync(e => e.Id == epicId);
         }
     }
 }
