@@ -15,6 +15,7 @@ namespace BugTracker.Application.Services
         private readonly IUnitOfWork _unitOfWork;
         private readonly IFileValidationService _fileValidationService;
         private readonly IFileStorageService _fileStorageService;
+        private readonly IActivityLogService _activityLogService;
         private readonly ILogger<AttachmentService> _logger;
 
         public AttachmentService(
@@ -22,12 +23,14 @@ namespace BugTracker.Application.Services
             ICurrentUserService currentUserService,
             IFileValidationService fileValidationService,
             IFileStorageService fileStorageService,
-            ILogger<AttachmentService> logger)
+            ILogger<AttachmentService> logger,
+            IActivityLogService activityLogService)
         {
             _unitOfWork = unitOfWork;
             _currentUserService = currentUserService;
             _fileValidationService = fileValidationService;
             _fileStorageService = fileStorageService;
+            _activityLogService = activityLogService;
             _logger = logger;
         }
         public async Task<AttachmentDto> UploadAsync(Guid issueId, CreateAttachmentDto dto)
@@ -109,15 +112,7 @@ namespace BugTracker.Application.Services
                 .AddAsync(attachment);
 
             // 10. ActivityLog
-            var activityLog = new ActivityLog
-            {
-                IssueId = issueId,
-                UserId = currentUserId,
-                Action = ActivityAction.AttachmentAdded
-            };
-
-            await _unitOfWork.ActivityLogs
-                .AddAsync(activityLog);
+            await _activityLogService.LogAsync(issueId,currentUserId, ActivityAction.AttachmentAdded);
 
             // 11. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
@@ -199,20 +194,15 @@ namespace BugTracker.Application.Services
             // On sauvegarde la clé de stockage avant suppression de l'entité
             var storageKey = attachment.StorageKey;
 
-            // 3. Supprimer le record de la DB et ajouter le Log
             _unitOfWork.Attachments.Delete(attachment);
 
-            var activityLog = new ActivityLog
-            {
-                IssueId = attachment.IssueId,
-                UserId = currentUserId,
-                Action = ActivityAction.AttachmentRemoved,
-                Field = "Attachment",
-                FromValue = storageKey,
-                ToValue = null
-            };
-
-            await _unitOfWork.ActivityLogs.AddAsync(activityLog);
+            await _activityLogService.LogAsync(
+                attachment.IssueId,
+                currentUserId,
+                ActivityAction.AttachmentRemoved,
+                "Attachment",
+                storageKey,
+                null);
 
             // 4. Valider la transaction SQL Server D'ABORD
             await _unitOfWork.SaveChangesAsync();
