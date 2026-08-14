@@ -15,10 +15,14 @@ namespace BugTracker.Application.Services
 
         private readonly ICurrentUserService _currentUserService;
 
-        public IssueService(IUnitOfWork unitOfWork, ICurrentUserService currentUserService)
+        private readonly IActivityLogService _activityLogService;
+
+        public IssueService(IUnitOfWork unitOfWork, ICurrentUserService currentUserService, 
+            IActivityLogService activityLogService)
         {
             _unitOfWork = unitOfWork;
             _currentUserService = currentUserService;
+            _activityLogService = activityLogService;
         }
 
         public async Task<IssueDto?> GetByIdAsync(Guid issueId)
@@ -121,17 +125,8 @@ namespace BugTracker.Application.Services
             await _unitOfWork.Issues.AddAsync(issue);
 
             // 6. Créer le ActivityLog "created"
-            var activityLog = new ActivityLog
-            {
-                IssueId = issue.Id,
-                UserId = currentUserId,
-                Action = ActivityAction.Created
-            };
+            await _activityLogService.LogAsync(issue.Id, currentUserId, ActivityAction.Created);
 
-
-            await _unitOfWork.ActivityLogs.AddAsync(activityLog);
-
-            
             await _unitOfWork.SaveChangesAsync();
 
             // 8. Charger les navigations nécessaires au mapping
@@ -289,18 +284,14 @@ namespace BugTracker.Application.Services
             issue.Status = newStatus;
 
             // 8. ActivityLog
-            var activityLog = new ActivityLog
-            {
-                IssueId = issue.Id,
-                UserId = currentUserId,
-                Action = ActivityAction.StatusChanged,
-                Field = "Status",
-                FromValue = oldStatus.ToString(),
-                ToValue = newStatus.ToString()
-            };
-
-            await _unitOfWork.ActivityLogs.AddAsync(activityLog);
-
+            await _activityLogService.LogAsync(
+                    issue.Id,
+                    currentUserId,
+                    ActivityAction.StatusChanged,
+                    "Status",
+                    oldStatus.ToString(),
+                    newStatus.ToString());
+                    
             // 9. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
         }
@@ -373,17 +364,13 @@ namespace BugTracker.Application.Services
             issue.AssigneeId = userId;
 
             // 7. ActivityLog
-            var activityLog = new ActivityLog
-            {
-                IssueId = issue.Id,
-                UserId = currentUserId,
-                Action = ActivityAction.Assigned,
-                Field = "Assignee",
-                FromValue = oldAssigneeId?.ToString(),
-                ToValue = userId.ToString()
-            };
-
-            await _unitOfWork.ActivityLogs.AddAsync(activityLog);
+            await _activityLogService.LogAsync(
+                issue.Id,
+                currentUserId,
+                ActivityAction.Assigned,
+                "Assignee",
+                oldAssigneeId?.ToString(),
+                userId.ToString());
 
             // 8. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
@@ -455,18 +442,14 @@ namespace BugTracker.Application.Services
                 issue.SprintId = sprintId;
             }
 
-            var activityLog = new ActivityLog
-            {
-                IssueId = issue.Id,
-                UserId = currentUserId,
-                Action = ActivityAction.SprintChanged,
-                Field = "Sprint",
-                FromValue = previousSprintId?.ToString(),
-                ToValue = issue.SprintId?.ToString()
-            };
-
-            await _unitOfWork.ActivityLogs.AddAsync(activityLog);
-
+            await _activityLogService.LogAsync(
+                  issue.Id,
+                  currentUserId,
+                  ActivityAction.SprintChanged,
+                  "Sprint",
+                  previousSprintId?.ToString(),
+                  issue.SprintId?.ToString());
+                  
             await _unitOfWork.SaveChangesAsync();
         }
 
