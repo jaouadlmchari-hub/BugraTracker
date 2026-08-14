@@ -40,6 +40,12 @@ namespace BugTracker.Infrastructure.Persistence.Repositories
                 .ToListAsync();
         }
 
+        public async Task<bool> ExistsAsync(Guid projectId)
+        {
+            return await _context.Projects
+                .AnyAsync(p => p.Id == projectId);
+        }
+
         public async Task<(IEnumerable<Project> Items, int TotalCount)> GetPaginatedAsync(
                ProjectFilterDto filter,Guid userId,bool isAdmin)
         {
