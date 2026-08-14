@@ -14,5 +14,7 @@ namespace BugTracker.Application.Interfaces.Repositories
         Task<IEnumerable<Epic>> GetActiveEpicsAsync(Guid projectId);
 
         Task<Epic?> GetByTitleAsync(Guid projectId, string title);
+
+        Task<Epic?> GetByIdWithDetailsAsync(Guid epicId);
     }
 }
