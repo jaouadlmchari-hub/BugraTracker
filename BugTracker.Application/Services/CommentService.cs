@@ -14,10 +14,14 @@ namespace BugTracker.Application.Services
 
         private readonly ICurrentUserService _currentUserService;
 
-        public CommentService(IUnitOfWork unitOfWork, ICurrentUserService currentUserService)
+        private readonly IActivityLogService _activityLogService;
+
+        public CommentService(IUnitOfWork unitOfWork, ICurrentUserService currentUserService,
+            IActivityLogService activityLogService)
         {
             _unitOfWork = unitOfWork;
             _currentUserService = currentUserService;
+            _activityLogService = activityLogService;
         }
 
         public async Task<CommentDto> CreateAsync(Guid issueId,CreateCommentDto dto)
@@ -62,15 +66,8 @@ namespace BugTracker.Application.Services
 
             await _unitOfWork.Comments.AddAsync(comment);
 
-           
-            var activityLog = new ActivityLog
-            {
-                IssueId = issueId,
-                UserId = currentUser,
-                Action = ActivityAction.Commented
-            };
 
-            await _unitOfWork.ActivityLogs.AddAsync(activityLog);
+            await _activityLogService.LogAsync(issueId,currentUser, ActivityAction.Commented);
 
             await _unitOfWork.SaveChangesAsync();
 
@@ -149,14 +146,7 @@ namespace BugTracker.Application.Services
 
             _unitOfWork.Comments.Delete(comment);
 
-            var activityLog = new ActivityLog
-            {
-                IssueId = comment.IssueId,
-                UserId = currentUserId,
-                Action = ActivityAction.CommentDeleted
-            };
-
-            await _unitOfWork.ActivityLogs.AddAsync(activityLog);
+            await _activityLogService.LogAsync(comment.IssueId,currentUserId,ActivityAction.CommentDeleted);
 
             await _unitOfWork.SaveChangesAsync();
         }
