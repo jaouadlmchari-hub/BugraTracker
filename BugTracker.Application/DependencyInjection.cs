@@ -24,6 +24,8 @@ public static class DependencyInjection
 
         services.AddValidatorsFromAssemblyContaining<CreateSprintValidator>();
 
+        services.AddScoped<IAuthService, AuthService>();
+
         return services;
     }
 }
