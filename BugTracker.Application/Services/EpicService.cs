@@ -1,16 +1,15 @@
-﻿using BugTracker.Domain.Enums;
-using BugTracker.Application.DTOs.Epics;
+﻿using BugTracker.Application.DTOs.Epics;
+using BugTracker.Application.Exceptions;
 using BugTracker.Application.Interfaces;
 using BugTracker.Application.Interfaces.Services;
-using BugTracker.Domain.Entities;
-using System.Runtime.CompilerServices;
 using BugTracker.Application.Mappings;
+using BugTracker.Domain.Entities;
+using BugTracker.Domain.Enums;
 
 namespace BugTracker.Application.Services
 {
-    public class EpicService :IEpicService
+    public class EpicService : IEpicService
     {
-
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUserService;
 
@@ -48,7 +47,7 @@ namespace BugTracker.Application.Services
             var projectExists = await _unitOfWork.Projects.ExistsAsync(projectId);
 
             if (!projectExists)
-                throw new KeyNotFoundException("Projet non trouvé.");
+                throw new NotFoundException("Projet non trouvé.");
 
             // 2. Utilisateur connecté
             var currentUserId = _currentUserService.UserId;
@@ -64,7 +63,7 @@ namespace BugTracker.Application.Services
                 if (currentMember == null ||
                     currentMember.Role != ProjectRole.Manager)
                 {
-                    throw new UnauthorizedAccessException(
+                    throw new ForbiddenException(
                         "Seuls le Manager et l'Admin peuvent créer un Epic.");
                 }
             }
@@ -95,8 +94,7 @@ namespace BugTracker.Application.Services
                 .GetByIdAsync(epicId);
 
             if (epic == null)
-                throw new KeyNotFoundException(
-                    "Epic non trouvé.");
+                throw new NotFoundException("Epic non trouvé.");
 
             var currentUserId = _currentUserService.UserId;
 
@@ -111,7 +109,7 @@ namespace BugTracker.Application.Services
                 if (currentMember == null ||
                     currentMember.Role != ProjectRole.Manager)
                 {
-                    throw new UnauthorizedAccessException(
+                    throw new ForbiddenException(
                         "Seuls le Manager et l'Admin peuvent modifier un Epic.");
                 }
             }
@@ -122,7 +120,6 @@ namespace BugTracker.Application.Services
             epic.ColorCode = dto.ColorCode;
 
             // 4. Sauvegarder
-            
             await _unitOfWork.SaveChangesAsync();
 
             // 5. Retourner le DTO
@@ -136,8 +133,7 @@ namespace BugTracker.Application.Services
                 .GetByIdWithDetailsAsync(epicId);
 
             if (epic == null)
-                throw new KeyNotFoundException(
-                    "Epic non trouvé.");
+                throw new NotFoundException("Epic non trouvé.");
 
             var currentUserId = _currentUserService.UserId;
 
@@ -152,7 +148,7 @@ namespace BugTracker.Application.Services
                 if (currentMember == null ||
                     currentMember.Role != ProjectRole.Manager)
                 {
-                    throw new UnauthorizedAccessException(
+                    throw new ForbiddenException(
                         "Seuls le Manager et l'Admin peuvent supprimer un Epic.");
                 }
             }
@@ -177,12 +173,17 @@ namespace BugTracker.Application.Services
                 .GetByIdAsync(epicId);
 
             if (epic == null)
-                throw new KeyNotFoundException(
-                    "Epic non trouvé.");
+                throw new NotFoundException("Epic non trouvé.");
+
+            // 2. Vérifier la validité de l'enum
+            if (!Enum.IsDefined(typeof(EpicStatus), newStatus))
+            {
+                throw new BusinessRuleException("Le statut fourni est invalide.");
+            }
 
             var currentUserId = _currentUserService.UserId;
 
-            // 2. Vérifier les permissions
+            // 3. Vérifier les permissions
             if (!_currentUserService.IsAdmin)
             {
                 var currentMember = await _unitOfWork.ProjectMembers
@@ -193,15 +194,15 @@ namespace BugTracker.Application.Services
                 if (currentMember == null ||
                     currentMember.Role != ProjectRole.Manager)
                 {
-                    throw new UnauthorizedAccessException(
+                    throw new ForbiddenException(
                         "Seuls le Manager et l'Admin peuvent modifier le statut d'un Epic.");
                 }
             }
 
-            // 3. Modifier le statut
+            // 4. Modifier le statut
             epic.Status = newStatus;
 
-            // 4. Sauvegarder
+            // 5. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
         }
     }
