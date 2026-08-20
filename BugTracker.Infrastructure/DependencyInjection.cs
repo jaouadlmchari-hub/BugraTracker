@@ -46,6 +46,10 @@ public static class DependencyInjection
         // S3 / MinIO
         services.AddS3Storage(configuration);
 
+        // JWT / RefrechToken
+        services.AddAuthenticationServices(configuration);
+
+
         return services;
     }
 }
