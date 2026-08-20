@@ -1,5 +1,6 @@
 ﻿using BugTracker.Application.DTOs.Common;
 using BugTracker.Application.DTOs.Projects;
+using BugTracker.Application.Exceptions;
 using BugTracker.Application.Interfaces;
 using BugTracker.Application.Interfaces.Services;
 using BugTracker.Application.Mappings;
@@ -8,15 +9,14 @@ using BugTracker.Domain.Enums;
 
 namespace BugTracker.Application.Services
 {
-    public  class ProjectService : IProjectService
+    public class ProjectService : IProjectService
     {
         private readonly IUnitOfWork _unitOfWork;
-
         private readonly ICurrentUserService _currentUserService;
-        public ProjectService(IUnitOfWork unitOfWork , ICurrentUserService currentUserService) 
+
+        public ProjectService(IUnitOfWork unitOfWork, ICurrentUserService currentUserService)
         {
             _unitOfWork = unitOfWork;
-
             _currentUserService = currentUserService;
         }
 
@@ -70,7 +70,7 @@ namespace BugTracker.Application.Services
                 .GetByKeyAsync(dto.Key);
 
             if (existingProject != null)
-                throw new InvalidOperationException("La clé du projet est déjà utilisée.");
+                throw new BusinessRuleException("La clé du projet est déjà utilisée.");
 
             var project = new Project
             {
@@ -88,31 +88,28 @@ namespace BugTracker.Application.Services
             });
 
             await _unitOfWork.Projects.AddAsync(project);
-
             await _unitOfWork.SaveChangesAsync();
 
             return project.ToDto();
         }
 
-        public async Task<ProjectDto> UpdateAsync(Guid projectId,UpdateProjectDto dto)
+        public async Task<ProjectDto> UpdateAsync(Guid projectId, UpdateProjectDto dto)
         {
             var project = await _unitOfWork.Projects.GetByIdWithMembersAsync(projectId);
 
             if (project == null)
-                throw new KeyNotFoundException("Projet non trouvé.");
-
-          
+                throw new NotFoundException("Projet non trouvé.");
 
             if (!_currentUserService.IsAdmin)
             {
                 var member = project.Members
-                           .FirstOrDefault(m => m.UserId == _currentUserService.UserId);
+                    .FirstOrDefault(m => m.UserId == _currentUserService.UserId);
 
                 if (member == null || member.Role != ProjectRole.Manager)
-                    throw new UnauthorizedAccessException(
+                {
+                    throw new ForbiddenException(
                         "Vous n'avez pas les droits pour modifier ce projet.");
-
-            
+                }
             }
 
             project.Name = dto.Name;
@@ -129,7 +126,7 @@ namespace BugTracker.Application.Services
             var project = await _unitOfWork.Projects.GetByIdWithMembersAsync(projectId);
 
             if (project == null)
-                throw new KeyNotFoundException("Projet non trouvé.");
+                throw new NotFoundException("Projet non trouvé.");
 
             if (!_currentUserService.IsAdmin)
             {
@@ -138,14 +135,15 @@ namespace BugTracker.Application.Services
 
                 if (member == null || member.Role != ProjectRole.Manager)
                 {
-                    throw new UnauthorizedAccessException(
+                    throw new ForbiddenException(
                         "Vous n'avez pas les droits pour archiver ce projet.");
                 }
             }
 
             if (project.Status == ProjectStatus.Archived)
-                throw new InvalidOperationException(
-                    "Le projet est déjà archivé.");
+            {
+                throw new BusinessRuleException("Le projet est déjà archivé.");
+            }
 
             project.Status = ProjectStatus.Archived;
             project.UpdatedAt = DateTime.UtcNow;
@@ -155,11 +153,10 @@ namespace BugTracker.Application.Services
 
         public async Task ActivateAsync(Guid projectId)
         {
-            var project = await _unitOfWork.Projects
-                .GetByIdWithMembersAsync(projectId);
+            var project = await _unitOfWork.Projects.GetByIdWithMembersAsync(projectId);
 
             if (project == null)
-                throw new KeyNotFoundException("Projet non trouvé.");
+                throw new NotFoundException("Projet non trouvé.");
 
             if (!_currentUserService.IsAdmin)
             {
@@ -168,14 +165,15 @@ namespace BugTracker.Application.Services
 
                 if (member == null || member.Role != ProjectRole.Manager)
                 {
-                    throw new UnauthorizedAccessException(
+                    throw new ForbiddenException(
                         "Vous n'avez pas les droits pour activer ce projet.");
                 }
             }
 
             if (project.Status == ProjectStatus.Active)
-                throw new InvalidOperationException(
-                    "Le projet est déjà actif.");
+            {
+                throw new BusinessRuleException("Le projet est déjà actif.");
+            }
 
             project.Status = ProjectStatus.Active;
             project.UpdatedAt = DateTime.UtcNow;
@@ -188,17 +186,16 @@ namespace BugTracker.Application.Services
             var project = await _unitOfWork.Projects.GetByIdWithMembersAsync(projectId);
 
             if (project == null)
-                throw new KeyNotFoundException("Projet non trouvé.");
+                throw new NotFoundException("Projet non trouvé.");
 
             if (!_currentUserService.IsAdmin)
             {
                 var currentMember = project.Members
                     .FirstOrDefault(m => m.UserId == _currentUserService.UserId);
 
-                if (currentMember == null ||
-                    currentMember.Role != ProjectRole.Manager)
+                if (currentMember == null || currentMember.Role != ProjectRole.Manager)
                 {
-                    throw new UnauthorizedAccessException(
+                    throw new ForbiddenException(
                         "Vous n'avez pas les droits pour changer le propriétaire.");
                 }
             }
@@ -206,16 +203,17 @@ namespace BugTracker.Application.Services
             var newOwner = await _unitOfWork.Users.GetByIdAsync(newOwnerId);
 
             if (newOwner == null)
-                throw new KeyNotFoundException(
-                    "Le nouvel utilisateur n'existe pas.");
+                throw new NotFoundException("Le nouvel utilisateur n'existe pas.");
 
             if (!newOwner.IsActive)
-                throw new InvalidOperationException(
-                    "Le nouvel utilisateur est désactivé.");
+            {
+                throw new BusinessRuleException("Le nouvel utilisateur est désactivé.");
+            }
 
             if (project.OwnerId == newOwnerId)
-                throw new InvalidOperationException(
-                    "Cet utilisateur est déjà propriétaire du projet.");
+            {
+                throw new BusinessRuleException("Cet utilisateur est déjà propriétaire du projet.");
+            }
 
             project.OwnerId = newOwnerId;
             project.UpdatedAt = DateTime.UtcNow;
@@ -227,21 +225,18 @@ namespace BugTracker.Application.Services
         {
             if (!_currentUserService.IsAdmin)
             {
-                throw new UnauthorizedAccessException(
+                throw new ForbiddenException(
                     "Seul un administrateur peut supprimer un projet.");
             }
 
             var project = await _unitOfWork.Projects.GetByIdAsync(projectId);
 
             if (project == null)
-            {
-                throw new KeyNotFoundException("Projet non trouvé.");
-            }
+                throw new NotFoundException("Projet non trouvé.");
 
             _unitOfWork.Projects.Delete(project);
 
             await _unitOfWork.SaveChangesAsync();
         }
-
     }
 }
