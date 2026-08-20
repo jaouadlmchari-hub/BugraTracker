@@ -1,6 +1,5 @@
-﻿
-
-using BugTracker.Application.DTOs.Issues;
+﻿using BugTracker.Application.DTOs.Issues;
+using BugTracker.Application.Exceptions;
 using BugTracker.Application.Interfaces;
 using BugTracker.Application.Interfaces.Services;
 using BugTracker.Application.Mappings;
@@ -12,12 +11,12 @@ namespace BugTracker.Application.Services
     public class IssueService : IIssueService
     {
         private readonly IUnitOfWork _unitOfWork;
-
         private readonly ICurrentUserService _currentUserService;
-
         private readonly IActivityLogService _activityLogService;
 
-        public IssueService(IUnitOfWork unitOfWork, ICurrentUserService currentUserService, 
+        public IssueService(
+            IUnitOfWork unitOfWork,
+            ICurrentUserService currentUserService,
             IActivityLogService activityLogService)
         {
             _unitOfWork = unitOfWork;
@@ -44,14 +43,14 @@ namespace BugTracker.Application.Services
                 .ToList();
         }
 
-        public async Task<IssueDto> CreateAsync(Guid projectId,CreateIssueDto dto)
+        public async Task<IssueDto> CreateAsync(Guid projectId, CreateIssueDto dto)
         {
             // 1. Vérifier que le projet existe
             var project = await _unitOfWork.Projects
                 .GetByIdAsync(projectId);
 
             if (project == null)
-                throw new KeyNotFoundException("Projet non trouvé.");
+                throw new NotFoundException("Projet non trouvé.");
 
             // 2. Vérifier que l'utilisateur connecté est membre du projet
             var currentUserId = _currentUserService.UserId;
@@ -60,11 +59,10 @@ namespace BugTracker.Application.Services
                 .GetByProjectAndUserAsync(projectId, currentUserId);
 
             if (currentMember == null)
-                throw new UnauthorizedAccessException(
+                throw new ForbiddenException(
                     "Vous devez être membre du projet pour créer un ticket.");
 
-            // 3. Si un Sprint est fourni, vérifier qu'il existe
-            //    et qu'il appartient au même projet
+            // 3. Si un Sprint est fourni, vérifier qu'il existe et qu'il appartient au même projet
             Sprint? sprint = null;
 
             if (dto.SprintId.HasValue)
@@ -73,15 +71,14 @@ namespace BugTracker.Application.Services
                     .GetByIdAsync(dto.SprintId.Value);
 
                 if (sprint == null)
-                    throw new KeyNotFoundException("Sprint non trouvé.");
+                    throw new NotFoundException("Sprint non trouvé.");
 
                 if (sprint.ProjectId != projectId)
-                    throw new InvalidOperationException(
+                    throw new BusinessRuleException(
                         "Le sprint n'appartient pas à ce projet.");
             }
 
-            // 4. Si un Assignee est fourni, vérifier qu'il est membre
-            //    du projet
+            // 4. Si un Assignee est fourni, vérifier qu'il est membre du projet
             if (dto.AssigneeId.HasValue)
             {
                 var assignee = await _unitOfWork.ProjectMembers
@@ -90,7 +87,7 @@ namespace BugTracker.Application.Services
                         dto.AssigneeId.Value);
 
                 if (assignee == null)
-                    throw new InvalidOperationException(
+                    throw new BusinessRuleException(
                         "L'utilisateur assigné doit être membre du projet.");
             }
 
@@ -98,27 +95,17 @@ namespace BugTracker.Application.Services
             var issue = new Issue
             {
                 ProjectId = projectId,
-
                 Title = dto.Title,
                 Description = dto.Description,
-
                 Type = dto.Type,
-
-                // ISSUE-02
                 Priority = dto.Priority ?? Priority.Medium,
-
-                // ISSUE-03
                 Status = IssueStatus.Todo,
-
                 StoryPoints = dto.StoryPoints,
                 DueDate = dto.DueDate,
-
                 EpicId = dto.EpicId,
                 SprintId = dto.SprintId,
-
                 ReporterId = currentUserId,
                 AssigneeId = dto.AssigneeId,
-
                 DisplayOrder = 0
             };
 
@@ -129,24 +116,24 @@ namespace BugTracker.Application.Services
 
             await _unitOfWork.SaveChangesAsync();
 
-            // 8. Charger les navigations nécessaires au mapping
+            // 7. Charger les navigations nécessaires au mapping
             var createdIssue = await _unitOfWork.Issues.GetByIdWithDetailsAsync(issue.Id);
 
             if (createdIssue == null)
-                throw new InvalidOperationException(
+                throw new NotFoundException(
                     "Impossible de récupérer l'issue créée.");
 
             return createdIssue.ToDto();
         }
 
-        public async Task<IssueDto> UpdateAsync(Guid issueId,UpdateIssueDto dto)
+        public async Task<IssueDto> UpdateAsync(Guid issueId, UpdateIssueDto dto)
         {
             // 1. Récupérer l'Issue
             var issue = await _unitOfWork.Issues
                 .GetByIdWithDetailsAsync(issueId);
 
             if (issue == null)
-                throw new KeyNotFoundException("Issue non trouvée.");
+                throw new NotFoundException("Issue non trouvée.");
 
             // 2. Vérifier les droits de modification
             var currentUserId = _currentUserService.UserId;
@@ -160,7 +147,7 @@ namespace BugTracker.Application.Services
 
                 if (currentMember == null)
                 {
-                    throw new UnauthorizedAccessException(
+                    throw new ForbiddenException(
                         "Vous n'êtes pas membre de ce projet.");
                 }
 
@@ -171,7 +158,7 @@ namespace BugTracker.Application.Services
 
                 if (!canUpdate)
                 {
-                    throw new UnauthorizedAccessException(
+                    throw new ForbiddenException(
                         "Vous n'avez pas les droits pour modifier cette issue.");
                 }
             }
@@ -193,7 +180,7 @@ namespace BugTracker.Application.Services
                 .GetByIdWithDetailsAsync(issueId);
 
             if (updatedIssue == null)
-                throw new InvalidOperationException(
+                throw new NotFoundException(
                     "Impossible de récupérer l'issue modifiée.");
 
             return updatedIssue.ToDto();
@@ -206,12 +193,12 @@ namespace BugTracker.Application.Services
                 .GetByIdWithDetailsAsync(issueId);
 
             if (issue == null)
-                throw new KeyNotFoundException("Issue non trouvée.");
+                throw new NotFoundException("Issue non trouvée.");
 
             // 2. Vérifier que le nouveau statut est valide
             if (!Enum.IsDefined(typeof(IssueStatus), newStatus))
             {
-                throw new InvalidOperationException(
+                throw new BusinessRuleException(
                     "Le statut fourni est invalide.");
             }
 
@@ -224,7 +211,7 @@ namespace BugTracker.Application.Services
                 if (sprint != null &&
                     sprint.Status == SprintStatus.Completed)
                 {
-                    throw new InvalidOperationException(
+                    throw new BusinessRuleException(
                         "Une issue appartenant à un sprint terminé ne peut plus changer de statut.");
                 }
             }
@@ -241,9 +228,10 @@ namespace BugTracker.Application.Services
 
                 if (currentMember == null)
                 {
-                    throw new UnauthorizedAccessException(
+                    throw new ForbiddenException(
                         "Vous n'êtes pas membre de ce projet.");
                 }
+
                 var isManager = currentMember.Role == ProjectRole.Manager;
                 var isQA = currentMember.Role == ProjectRole.QA;
                 var isAssignee = issue.AssigneeId == currentUserId;
@@ -255,7 +243,7 @@ namespace BugTracker.Application.Services
                 {
                     if (!isQABug && !isManager)
                     {
-                        throw new UnauthorizedAccessException(
+                        throw new ForbiddenException(
                             "Seuls les QA, PM et Admin peuvent rouvrir une issue.");
                     }
                 }
@@ -264,7 +252,7 @@ namespace BugTracker.Application.Services
                 {
                     if (!isAssignee && !isManager && !isQABug)
                     {
-                        throw new UnauthorizedAccessException(
+                        throw new ForbiddenException(
                             "Vous n'avez pas les droits pour changer le statut de cette issue.");
                     }
                 }
@@ -273,7 +261,7 @@ namespace BugTracker.Application.Services
             // 5. Vérifier la transition
             if (!IsValidTransition(issue.Status, newStatus))
             {
-                throw new InvalidOperationException(
+                throw new BusinessRuleException(
                     "INVALID_STATUS_TRANSITION");
             }
 
@@ -291,12 +279,12 @@ namespace BugTracker.Application.Services
                     "Status",
                     oldStatus.ToString(),
                     newStatus.ToString());
-                    
+
             // 9. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
         }
 
-        private static bool IsValidTransition(IssueStatus currentStatus,IssueStatus newStatus)
+        private static bool IsValidTransition(IssueStatus currentStatus, IssueStatus newStatus)
         {
             return (currentStatus == IssueStatus.Todo &&
                     newStatus == IssueStatus.InProgress)
@@ -318,7 +306,7 @@ namespace BugTracker.Application.Services
                 .GetByIdWithDetailsAsync(issueId);
 
             if (issue == null)
-                throw new KeyNotFoundException("Issue non trouvée.");
+                throw new NotFoundException("Issue non trouvée.");
 
             // 2. Vérifier les droits de l'utilisateur connecté
             var currentUserId = _currentUserService.UserId;
@@ -333,7 +321,7 @@ namespace BugTracker.Application.Services
                 if (currentMember == null ||
                     currentMember.Role != ProjectRole.Manager)
                 {
-                    throw new UnauthorizedAccessException(
+                    throw new ForbiddenException(
                         "Seuls les PM et Admin peuvent assigner une issue.");
                 }
             }
@@ -346,14 +334,14 @@ namespace BugTracker.Application.Services
 
             if (targetMember == null)
             {
-                throw new InvalidOperationException(
+                throw new BusinessRuleException(
                     "L'utilisateur à assigner doit être membre du projet.");
             }
 
             // 4. Vérifier si l'utilisateur est déjà assigné
             if (issue.AssigneeId == userId)
             {
-                throw new InvalidOperationException(
+                throw new BusinessRuleException(
                     "Cette issue est déjà assignée à cet utilisateur.");
             }
 
@@ -382,7 +370,7 @@ namespace BugTracker.Application.Services
                 .GetByIdWithDetailsAsync(issueId);
 
             if (issue == null)
-                throw new KeyNotFoundException("Issue non trouvée.");
+                throw new NotFoundException("Issue non trouvée.");
 
             var currentUserId = _currentUserService.UserId;
 
@@ -396,7 +384,7 @@ namespace BugTracker.Application.Services
                 if (currentMember == null ||
                     currentMember.Role != ProjectRole.Manager)
                 {
-                    throw new UnauthorizedAccessException(
+                    throw new ForbiddenException(
                         "Seuls les PM et Admin peuvent déplacer une issue vers un sprint.");
                 }
             }
@@ -407,7 +395,7 @@ namespace BugTracker.Application.Services
             {
                 if (issue.SprintId == null)
                 {
-                    throw new InvalidOperationException(
+                    throw new BusinessRuleException(
                         "L'issue est déjà dans le backlog.");
                 }
 
@@ -419,23 +407,23 @@ namespace BugTracker.Application.Services
                     .GetByIdAsync(sprintId.Value);
 
                 if (sprint == null)
-                    throw new KeyNotFoundException("Sprint non trouvé.");
+                    throw new NotFoundException("Sprint non trouvé.");
 
                 if (sprint.ProjectId != issue.ProjectId)
                 {
-                    throw new InvalidOperationException(
+                    throw new BusinessRuleException(
                         "Le sprint n'appartient pas au même projet que l'issue.");
                 }
 
                 if (sprint.Status == SprintStatus.Completed)
                 {
-                    throw new InvalidOperationException(
+                    throw new BusinessRuleException(
                         "Impossible de déplacer une issue vers un sprint terminé.");
                 }
 
                 if (issue.SprintId == sprintId)
                 {
-                    throw new InvalidOperationException(
+                    throw new BusinessRuleException(
                         "L'issue appartient déjà à ce sprint.");
                 }
 
@@ -449,7 +437,7 @@ namespace BugTracker.Application.Services
                   "Sprint",
                   previousSprintId?.ToString(),
                   issue.SprintId?.ToString());
-                  
+
             await _unitOfWork.SaveChangesAsync();
         }
 
@@ -460,7 +448,7 @@ namespace BugTracker.Application.Services
                 .GetByIdAsync(issueId);
 
             if (issue == null)
-                throw new KeyNotFoundException("Issue non trouvée.");
+                throw new NotFoundException("Issue non trouvée.");
 
             // 2. Vérifier les droits
             var currentUserId = _currentUserService.UserId;
@@ -475,7 +463,7 @@ namespace BugTracker.Application.Services
                 if (currentMember == null ||
                     currentMember.Role != ProjectRole.Manager)
                 {
-                    throw new UnauthorizedAccessException(
+                    throw new ForbiddenException(
                         "Seuls les PM et Admin peuvent supprimer une issue.");
                 }
             }
