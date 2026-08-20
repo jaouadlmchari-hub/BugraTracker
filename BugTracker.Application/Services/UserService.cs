@@ -1,26 +1,23 @@
 ﻿using BugTracker.Application.DTOs.Common;
 using BugTracker.Application.DTOs.Users;
+using BugTracker.Application.Exceptions;
 using BugTracker.Application.Interfaces;
 using BugTracker.Application.Interfaces.Services;
 using BugTracker.Application.Mappings;
 using BugTracker.Domain.Entities;
 using BugTracker.Domain.Enums;
 
-
 namespace BugTracker.Application.Services
 {
     public class UserService : IUserService
     {
         private readonly IUnitOfWork _unitOfWork;
-
         private readonly IPasswordHasher _passwordHasher;
 
         public UserService(IUnitOfWork unitOfWork, IPasswordHasher passwordHasher)
         {
             _unitOfWork = unitOfWork;
-
             _passwordHasher = passwordHasher;
-
         }
 
         public async Task<UserDto?> GetByIdAsync(Guid id)
@@ -35,7 +32,7 @@ namespace BugTracker.Application.Services
 
         public async Task<UserDto?> GetByEmailAsync(string email)
         {
-           var user = await  _unitOfWork.Users.GetByEmailAsync(email);
+            var user = await _unitOfWork.Users.GetByEmailAsync(email);
 
             if (user == null)
                 return null;
@@ -49,13 +46,13 @@ namespace BugTracker.Application.Services
 
             return users.Select(user => user.ToDto());
         }
-        
+
         public async Task<UserDto> CreateAsync(CreateUserDto dto)
         {
             var isUnique = await _unitOfWork.Users.IsEmailUniqueAsync(dto.Email);
 
             if (!isUnique)
-                throw new InvalidOperationException("Email is already in use.");
+                throw new ConflictException("Email is already in use.");
 
             var hashedPassword = _passwordHasher.Hash(dto.Password);
 
@@ -74,17 +71,17 @@ namespace BugTracker.Application.Services
             return user.ToDto();
         }
 
-        public async Task <UserDto> UpdateAsync(Guid userId , UpdateUserDto dto)
+        public async Task<UserDto> UpdateAsync(Guid userId, UpdateUserDto dto)
         {
             var user = await _unitOfWork.Users.GetByIdAsync(userId);
 
             if (user == null)
-                throw new KeyNotFoundException("User not found.");
+                throw new NotFoundException("User not found.");
 
             var isUnique = await _unitOfWork.Users.IsEmailUniqueAsync(dto.Email, userId);
 
             if (!isUnique)
-                throw new InvalidOperationException("Email is already in use.");
+                throw new ConflictException("Email is already in use.");
 
             user.Email = dto.Email;
             user.Username = dto.Username;
@@ -95,7 +92,6 @@ namespace BugTracker.Application.Services
             await _unitOfWork.SaveChangesAsync();
 
             return user.ToDto();
-
         }
 
         public async Task DeactivateAsync(Guid userId)
@@ -103,7 +99,7 @@ namespace BugTracker.Application.Services
             var user = await _unitOfWork.Users.GetByIdAsync(userId);
 
             if (user == null)
-                throw new KeyNotFoundException("User not found.");
+                throw new NotFoundException("User not found.");
 
             user.IsActive = false;
             user.UpdatedAt = DateTime.UtcNow;
@@ -116,7 +112,7 @@ namespace BugTracker.Application.Services
             var user = await _unitOfWork.Users.GetByIdAsync(userId);
 
             if (user == null)
-                throw new KeyNotFoundException("User not found.");
+                throw new NotFoundException("User not found.");
 
             user.IsActive = true;
             user.UpdatedAt = DateTime.UtcNow;
@@ -129,7 +125,7 @@ namespace BugTracker.Application.Services
             var isUnique = await _unitOfWork.Users.IsEmailUniqueAsync(dto.Email);
 
             if (!isUnique)
-                throw new InvalidOperationException("Email is already in use.");
+                throw new ConflictException("Email is already in use.");
 
             var hashedPassword = _passwordHasher.Hash(dto.Password);
 
@@ -170,11 +166,11 @@ namespace BugTracker.Application.Services
         {
             var user = await _unitOfWork.Users.GetByIdAsync(userId);
 
-            if (user == null )
-                throw new KeyNotFoundException("User not found.");
+            if (user == null)
+                throw new NotFoundException("User not found.");
 
             if (!Enum.IsDefined(typeof(SystemRole), newRole))
-                throw new ArgumentException("Invalid system role.");
+                throw new BusinessRuleException("Invalid system role.");
 
             user.SystemRole = newRole;
             user.UpdatedAt = DateTime.UtcNow;
@@ -184,26 +180,24 @@ namespace BugTracker.Application.Services
 
         public async Task ChangePasswordAsync(Guid userId, ChangePasswordDto dto)
         {
-           
             var user = await _unitOfWork.Users.GetByIdAsync(userId);
-            if (user == null)
-                throw new KeyNotFoundException("Utilisateur non trouvé.");
 
-            
+            if (user == null)
+                throw new NotFoundException("Utilisateur non trouvé.");
+
             var isCurrentPasswordValid = _passwordHasher.Verify(dto.CurrentPassword, user.PasswordHash);
             if (!isCurrentPasswordValid)
-                throw new UnauthorizedAccessException("Le mot de passe actuel est incorrect.");
+                throw new BusinessRuleException("Le mot de passe actuel est incorrect.");
 
             var isSamePassword = _passwordHasher.Verify(dto.NewPassword, user.PasswordHash);
             if (isSamePassword)
-                throw new InvalidOperationException("Le nouveau mot de passe doit être différent de l'ancien.");
+                throw new BusinessRuleException("Le nouveau mot de passe doit être différent de l'ancien.");
 
             user.PasswordHash = _passwordHasher.Hash(dto.NewPassword);
             user.FailedLoginAttempts = 0;
             user.LockoutUntil = null;
             user.UpdatedAt = DateTime.UtcNow;
 
-           
             await _unitOfWork.SaveChangesAsync();
         }
 
@@ -212,7 +206,7 @@ namespace BugTracker.Application.Services
             var user = await _unitOfWork.Users.GetByIdAsync(userId);
 
             if (user == null)
-                throw new KeyNotFoundException("Utilisateur non trouvé.");
+                throw new NotFoundException("Utilisateur non trouvé.");
 
             user.FailedLoginAttempts = 0;
             user.LockoutUntil = null;
