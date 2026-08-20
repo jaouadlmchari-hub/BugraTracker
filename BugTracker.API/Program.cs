@@ -1,3 +1,5 @@
+using BugTracker.API.Extensions;
+using BugTracker.API.Middleware;
 using BugTracker.Application;
 using BugTracker.Infrastructure;
 
@@ -12,6 +14,8 @@ namespace BugTracker.API
 
             builder.Services.AddApplication();
             builder.Services.AddInfrastructure(builder.Configuration);
+            builder.Services.AddJwtBearerAuthentication(builder.Configuration);
+
 
             // Add services to the container.
             builder.Services.AddControllers();
@@ -20,6 +24,8 @@ namespace BugTracker.API
             builder.Services.AddSwaggerGen();
 
             var app = builder.Build();
+
+            app.UseMiddleware<GlobalExceptionMiddleware>();
 
             // Configure the HTTP request pipeline.
             if (app.Environment.IsDevelopment())
@@ -30,8 +36,9 @@ namespace BugTracker.API
 
             app.UseHttpsRedirection();
 
-            app.UseAuthorization();
+            app.UseAuthentication();
 
+            app.UseAuthorization();
 
             app.MapControllers();
 
