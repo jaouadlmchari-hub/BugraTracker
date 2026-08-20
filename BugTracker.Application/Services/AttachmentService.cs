@@ -1,4 +1,5 @@
 ﻿using BugTracker.Application.DTOs.Attachments;
+using BugTracker.Application.Exceptions;
 using BugTracker.Application.Interfaces;
 using BugTracker.Application.Interfaces.Services;
 using BugTracker.Application.Mappings;
@@ -10,7 +11,6 @@ namespace BugTracker.Application.Services
 {
     public class AttachmentService : IAttachmentService
     {
-
         private readonly ICurrentUserService _currentUserService;
         private readonly IUnitOfWork _unitOfWork;
         private readonly IFileValidationService _fileValidationService;
@@ -33,15 +33,14 @@ namespace BugTracker.Application.Services
             _activityLogService = activityLogService;
             _logger = logger;
         }
+
         public async Task<AttachmentDto> UploadAsync(Guid issueId, CreateAttachmentDto dto)
         {
             // 1. Vérifier que l'Issue existe
-            var issue = await _unitOfWork.Issues
-                .GetByIdAsync(issueId);
+            var issue = await _unitOfWork.Issues.GetByIdAsync(issueId);
 
             if (issue == null)
-                throw new KeyNotFoundException(
-                    "Issue non trouvée.");
+                throw new NotFoundException("Issue non trouvée.");
 
             // 2. Utilisateur connecté
             var currentUserId = _currentUserService.UserId;
@@ -50,54 +49,46 @@ namespace BugTracker.Application.Services
             if (!_currentUserService.IsAdmin)
             {
                 var currentMember = await _unitOfWork.ProjectMembers
-                    .GetByProjectAndUserAsync(
-                        issue.ProjectId,
-                        currentUserId);
+                    .GetByProjectAndUserAsync(issue.ProjectId, currentUserId);
 
                 if (currentMember == null)
                 {
-                    throw new UnauthorizedAccessException(
-                        "L'utilisateur n'est pas membre du projet.");
+                    throw new ForbiddenException("L'utilisateur n'est pas membre du projet.");
                 }
             }
 
             // 4. Vérifier que le fichier existe
             if (dto.FileContent == null)
-                throw new InvalidDataException(
-                    "Aucun fichier fourni.");
+                throw new BusinessRuleException("Aucun fichier fourni.");
 
             // 5. Vérifier le nombre maximum de fichiers
             var attachmentCount = await _unitOfWork.Attachments.CountByIssueIdAsync(issueId);
 
             if (attachmentCount >= 20)
             {
-                throw new InvalidDataException(
-                    "MAX_ATTACHMENTS_REACHED");
+                throw new BusinessRuleException("MAX_ATTACHMENTS_REACHED");
             }
 
-            // 6. Valider le fichier
+            // 6. Valider le fichier (type, taille, signature/magic bytes)
             await _fileValidationService.ValidateAsync(
                 dto.FileContent,
                 dto.FileName,
                 dto.ContentType);
 
-            // Revenir au début du stream après validation
             if (dto.FileContent.CanSeek)
                 dto.FileContent.Position = 0;
 
             // 7. Générer UUID + extension originale
             var extension = Path.GetExtension(dto.FileName);
+            var storageKey = $"{Guid.NewGuid()}{extension}";
 
-            var storageKey =
-                $"{Guid.NewGuid()}{extension}";
-
-            // 8. Stocker dans Object Storage
+            // 8. Stocker dans Object Storage (MinIO / S3)
             await _fileStorageService.UploadAsync(
                 dto.FileContent,
                 storageKey,
                 dto.ContentType);
 
-            // 9. Créer l'Attachment
+            // 9. Créer l'Attachment en BDD
             var attachment = new Attachment
             {
                 IssueId = issueId,
@@ -108,21 +99,18 @@ namespace BugTracker.Application.Services
                 SizeBytes = dto.FileContent.Length
             };
 
-            await _unitOfWork.Attachments
-                .AddAsync(attachment);
+            await _unitOfWork.Attachments.AddAsync(attachment);
 
             // 10. ActivityLog
-            await _activityLogService.LogAsync(issueId,currentUserId, ActivityAction.AttachmentAdded);
+            await _activityLogService.LogAsync(issueId, currentUserId, ActivityAction.AttachmentAdded);
 
             // 11. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
 
             // 12. URL pré-signée valable 1 heure
-            var downloadUrl =
-                await _fileStorageService
-                    .GenerateDownloadUrlAsync(
-                        storageKey,
-                        TimeSpan.FromHours(1));
+            var downloadUrl = await _fileStorageService.GenerateDownloadUrlAsync(
+                storageKey,
+                TimeSpan.FromHours(1));
 
             // 13. Retourner le DTO
             return attachment.ToDto(downloadUrl);
@@ -131,12 +119,10 @@ namespace BugTracker.Application.Services
         public async Task<string> GetDownloadUrlAsync(Guid attachmentId)
         {
             // 1. Récupérer l'attachment
-            var attachment = await _unitOfWork.Attachments
-                  .GetByIdWithDetailsAsync(attachmentId);
+            var attachment = await _unitOfWork.Attachments.GetByIdWithDetailsAsync(attachmentId);
 
             if (attachment == null)
-                throw new KeyNotFoundException(
-                    "Pièce jointe non trouvée.");
+                throw new NotFoundException("Pièce jointe non trouvée.");
 
             // 2. Récupérer l'utilisateur connecté
             var currentUserId = _currentUserService.UserId;
@@ -145,53 +131,42 @@ namespace BugTracker.Application.Services
             if (!_currentUserService.IsAdmin)
             {
                 var currentMember = await _unitOfWork.ProjectMembers
-                    .GetByProjectAndUserAsync(
-                        attachment.Issue.ProjectId,
-                        currentUserId);
+                    .GetByProjectAndUserAsync(attachment.Issue.ProjectId, currentUserId);
 
                 if (currentMember == null)
                 {
-                    throw new UnauthorizedAccessException(
-                        "L'utilisateur n'est pas membre du projet.");
+                    throw new ForbiddenException("L'utilisateur n'est pas membre du projet.");
                 }
             }
 
             // 4. Générer une URL temporaire
-            var downloadUrl = await _fileStorageService
-                .GenerateDownloadUrlAsync(
-                    attachment.StorageKey,
-                    TimeSpan.FromHours(1));
-
-            return downloadUrl;
+            return await _fileStorageService.GenerateDownloadUrlAsync(
+                attachment.StorageKey,
+                TimeSpan.FromHours(1));
         }
 
         public async Task DeleteAsync(Guid attachmentId)
         {
             // 1. Récupérer l'Attachment avec son Issue
-            var attachment = await _unitOfWork.Attachments
-                .GetByIdWithDetailsAsync(attachmentId);
+            var attachment = await _unitOfWork.Attachments.GetByIdWithDetailsAsync(attachmentId);
 
             if (attachment == null)
-                throw new KeyNotFoundException("Pièce jointe non trouvée.");
+                throw new NotFoundException("Pièce jointe non trouvée.");
 
             var currentUserId = _currentUserService.UserId;
 
-            // 2. Vérifier les permissions
+            // 2. Vérifier les permissions (Manager du projet ou Admin)
             if (!_currentUserService.IsAdmin)
             {
                 var currentMember = await _unitOfWork.ProjectMembers
-                    .GetByProjectAndUserAsync(
-                        attachment.Issue.ProjectId,
-                        currentUserId);
+                    .GetByProjectAndUserAsync(attachment.Issue.ProjectId, currentUserId);
 
                 if (currentMember == null || currentMember.Role != ProjectRole.Manager)
                 {
-                    throw new UnauthorizedAccessException(
-                        "Seuls le PM et l'Admin peuvent supprimer une pièce jointe.");
+                    throw new ForbiddenException("Seuls le PM et l'Admin peuvent supprimer une pièce jointe.");
                 }
             }
 
-            // On sauvegarde la clé de stockage avant suppression de l'entité
             var storageKey = attachment.StorageKey;
 
             _unitOfWork.Attachments.Delete(attachment);
@@ -204,26 +179,21 @@ namespace BugTracker.Application.Services
                 storageKey,
                 null);
 
-            // 4. Valider la transaction SQL Server D'ABORD
+            // 3. Valider la transaction BDD d'abord
             await _unitOfWork.SaveChangesAsync();
 
-            // 5. Supprimer le fichier sur S3/MinIO APRES la réussite de la DB
+            // 4. Supprimer du stockage S3/MinIO après succès BDD
             try
             {
                 await _fileStorageService.DeleteAsync(storageKey);
             }
             catch (Exception ex)
             {
-                // La DB est déjà à jour. En cas d'échec S3, on log l'erreur 
-                // pour un nettoyage ultérieur (ex: via un Background Job / Hangfire)
                 _logger.LogError(
                     ex,
                     "Le fichier {StorageKey} n'a pas pu être supprimé de S3 après suppression de la pièce jointe {AttachmentId} en BDD.",
                     storageKey,
                     attachmentId);
-
-                // Optionnel : ne pas relancer d'exception vers l'utilisateur 
-                // car la pièce jointe est bel et bien supprimée de l'application.
             }
         }
     }
