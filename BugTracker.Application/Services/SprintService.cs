@@ -1,4 +1,5 @@
 ﻿using BugTracker.Application.DTOs.Sprints;
+using BugTracker.Application.Exceptions;
 using BugTracker.Application.Interfaces;
 using BugTracker.Application.Interfaces.Services;
 using BugTracker.Application.Mappings;
@@ -10,13 +11,11 @@ namespace BugTracker.Application.Services
     public class SprintService : ISprintService
     {
         private readonly IUnitOfWork _unitOfWork;
-
         private readonly ICurrentUserService _currentUserService;
 
-        public SprintService(IUnitOfWork unitOfWork , ICurrentUserService currentUserService)
+        public SprintService(IUnitOfWork unitOfWork, ICurrentUserService currentUserService)
         {
             _unitOfWork = unitOfWork;
-
             _currentUserService = currentUserService;
         }
 
@@ -26,6 +25,7 @@ namespace BugTracker.Application.Services
 
             if (sprint == null)
                 return null;
+
             return sprint.ToDto();
         }
 
@@ -38,13 +38,13 @@ namespace BugTracker.Application.Services
                 .ToList();
         }
 
-        public async Task<SprintDto> CreateAsync(Guid projectId,CreateSprintDto dto)
+        public async Task<SprintDto> CreateAsync(Guid projectId, CreateSprintDto dto)
         {
             // 1. Vérifier que le projet existe
             var project = await _unitOfWork.Projects.GetByIdAsync(projectId);
 
             if (project == null)
-                throw new KeyNotFoundException("Projet non trouvé.");
+                throw new NotFoundException("Projet non trouvé.");
 
             // 2. Vérifier les droits
             if (!_currentUserService.IsAdmin)
@@ -57,7 +57,7 @@ namespace BugTracker.Application.Services
                 if (currentMember == null ||
                     currentMember.Role != ProjectRole.Manager)
                 {
-                    throw new UnauthorizedAccessException(
+                    throw new ForbiddenException(
                         "Vous n'avez pas les droits pour créer un sprint.");
                 }
             }
@@ -67,7 +67,7 @@ namespace BugTracker.Application.Services
                 dto.EndDate.HasValue &&
                 dto.EndDate <= dto.StartDate)
             {
-                throw new InvalidOperationException(
+                throw new BusinessRuleException(
                     "La date de fin doit être postérieure à la date de début.");
             }
 
@@ -79,8 +79,6 @@ namespace BugTracker.Application.Services
                 Goal = dto.Goal,
                 StartDate = dto.StartDate,
                 EndDate = dto.EndDate,
-
-                // SPRINT-02
                 Status = SprintStatus.Planning
             };
 
@@ -100,12 +98,12 @@ namespace BugTracker.Application.Services
             var sprint = await _unitOfWork.Sprints.GetByIdAsync(sprintId);
 
             if (sprint == null)
-                throw new KeyNotFoundException("Sprint non trouvé.");
+                throw new NotFoundException("Sprint non trouvé.");
 
             // 2. Vérifier le statut
             if (sprint.Status != SprintStatus.Planning)
             {
-                throw new InvalidOperationException(
+                throw new BusinessRuleException(
                     "Seul un sprint en Planning peut être modifié.");
             }
 
@@ -120,7 +118,7 @@ namespace BugTracker.Application.Services
                 if (currentMember == null ||
                     currentMember.Role != ProjectRole.Manager)
                 {
-                    throw new UnauthorizedAccessException(
+                    throw new ForbiddenException(
                         "Vous n'avez pas les droits pour modifier ce sprint.");
                 }
             }
@@ -130,7 +128,7 @@ namespace BugTracker.Application.Services
                 dto.EndDate.HasValue &&
                 dto.EndDate <= dto.StartDate)
             {
-                throw new InvalidOperationException(
+                throw new BusinessRuleException(
                     "La date de fin doit être postérieure à la date de début.");
             }
 
@@ -152,12 +150,12 @@ namespace BugTracker.Application.Services
             var sprint = await _unitOfWork.Sprints.GetByIdAsync(sprintId);
 
             if (sprint == null)
-                throw new KeyNotFoundException("Sprint non trouvé.");
+                throw new NotFoundException("Sprint non trouvé.");
 
             // 2. Vérifier que le sprint est en Planning
             if (sprint.Status != SprintStatus.Planning)
             {
-                throw new InvalidOperationException(
+                throw new BusinessRuleException(
                     "Seul un sprint en Planning peut être démarré.");
             }
 
@@ -172,7 +170,7 @@ namespace BugTracker.Application.Services
                 if (currentMember == null ||
                     currentMember.Role != ProjectRole.Manager)
                 {
-                    throw new UnauthorizedAccessException(
+                    throw new ForbiddenException(
                         "Vous n'avez pas les droits pour démarrer ce sprint.");
                 }
             }
@@ -183,11 +181,9 @@ namespace BugTracker.Application.Services
 
             if (activeSprints.Any())
             {
-                throw new InvalidOperationException(
-                   "SPRINT_ALREADY_ACTIVE");
+                throw new BusinessRuleException(
+                    "Un sprint est déjà actif pour ce projet.");
             }
-           
-
 
             // 5. Démarrer le sprint
             sprint.Status = SprintStatus.Active;
@@ -201,7 +197,7 @@ namespace BugTracker.Application.Services
             var sprint = await _unitOfWork.Sprints.GetByIdAsync(sprintId);
 
             if (sprint == null)
-                throw new KeyNotFoundException("Sprint non trouvé.");
+                throw new NotFoundException("Sprint non trouvé.");
 
             // 2. Vérifier les droits
             if (!_currentUserService.IsAdmin)
@@ -214,7 +210,7 @@ namespace BugTracker.Application.Services
                 if (currentMember == null ||
                     currentMember.Role != ProjectRole.Manager)
                 {
-                    throw new UnauthorizedAccessException(
+                    throw new ForbiddenException(
                         "Vous n'avez pas les droits pour terminer ce sprint.");
                 }
             }
@@ -222,7 +218,7 @@ namespace BugTracker.Application.Services
             // 3. Le sprint doit être Active
             if (sprint.Status != SprintStatus.Active)
             {
-                throw new InvalidOperationException(
+                throw new BusinessRuleException(
                     "Seul un sprint actif peut être terminé.");
             }
 
@@ -250,7 +246,7 @@ namespace BugTracker.Application.Services
             var sprint = await _unitOfWork.Sprints.GetByIdAsync(sprintId);
 
             if (sprint == null)
-                throw new KeyNotFoundException("Sprint non trouvé.");
+                throw new NotFoundException("Sprint non trouvé.");
 
             // 2. Vérifier les droits
             if (!_currentUserService.IsAdmin)
@@ -263,7 +259,7 @@ namespace BugTracker.Application.Services
                 if (currentMember == null ||
                     currentMember.Role != ProjectRole.Manager)
                 {
-                    throw new UnauthorizedAccessException(
+                    throw new ForbiddenException(
                         "Vous n'avez pas les droits pour supprimer ce sprint.");
                 }
             }
@@ -271,7 +267,7 @@ namespace BugTracker.Application.Services
             // 3. Un sprint Active ne peut pas être supprimé
             if (sprint.Status == SprintStatus.Active)
             {
-                throw new InvalidOperationException(
+                throw new BusinessRuleException(
                     "Un sprint actif ne peut pas être supprimé.");
             }
 
