@@ -201,6 +201,22 @@ namespace BugTracker.Application.Services
             await _unitOfWork.SaveChangesAsync();
         }
 
+        public async Task ResetPasswordAsync(Guid userId, ResetPasswordDto dto)
+        {
+            var user = await _unitOfWork.Users.GetByIdAsync(userId);
+
+            if (user == null)
+                throw new NotFoundException("Utilisateur introuvable.");
+
+            user.PasswordHash =
+                _passwordHasher.Hash(dto.NewPassword);
+
+            user.FailedLoginAttempts = 0;
+            user.LockoutUntil = null;
+
+            await _unitOfWork.SaveChangesAsync();
+        }
+
         public async Task UnlockUserAsync(Guid userId)
         {
             var user = await _unitOfWork.Users.GetByIdAsync(userId);
