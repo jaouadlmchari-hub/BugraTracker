@@ -24,5 +24,6 @@ public interface IUserService
 
     // Sécurité
     Task ChangePasswordAsync(Guid userId, ChangePasswordDto dto);
+    Task ResetPasswordAsync(Guid userId, ResetPasswordDto dto);
     Task UnlockUserAsync(Guid userId);
 }
