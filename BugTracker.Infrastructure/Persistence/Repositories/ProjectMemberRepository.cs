@@ -28,6 +28,15 @@ namespace BugTracker.Infrastructure.Persistence.Repositories
                       .ToListAsync();
         }
 
+        public async Task<bool> ShareAnyProjectAsync(Guid firstUserId, Guid secondUserId)
+        {
+            return await _context.ProjectMembers
+                .Where(pm => pm.UserId == firstUserId)
+                .AnyAsync(pm =>
+                    _context.ProjectMembers.Any(other =>
+                        other.ProjectId == pm.ProjectId &&
+                        other.UserId == secondUserId));
+        }
 
         public async Task<IEnumerable<ProjectMember>> GetByUserIdAsync(Guid userId)
         {
