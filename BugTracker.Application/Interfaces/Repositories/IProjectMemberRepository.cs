@@ -14,6 +14,8 @@ namespace BugTracker.Application.Interfaces.Repositories
 
         Task<IEnumerable<ProjectMember>> GetByProjectIdAsync(Guid projectId);
 
+        Task<bool> ShareAnyProjectAsync(Guid firstUserId, Guid secondUserId);
+
         Task<IEnumerable<ProjectMember>> GetByUserIdAsync(Guid userId);
 
         Task<IEnumerable<ProjectMember>> GetByRoleAsync(Guid projectId, ProjectRole role);
