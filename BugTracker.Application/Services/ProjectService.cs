@@ -70,7 +70,7 @@ namespace BugTracker.Application.Services
                 .GetByKeyAsync(dto.Key);
 
             if (existingProject != null)
-                throw new BusinessRuleException("La clé du projet est déjà utilisée.");
+                throw new ConflictException("La clé du projet est déjà utilisée.");
 
             var project = new Project
             {
