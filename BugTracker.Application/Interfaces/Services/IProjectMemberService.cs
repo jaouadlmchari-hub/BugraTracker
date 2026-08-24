@@ -19,5 +19,9 @@ namespace BugTracker.Application.Interfaces.Services
         Task ChangeRoleAsync( Guid projectId, Guid userId, ProjectRole newRole);
 
         Task RemoveMemberAsync(Guid projectId, Guid userId);
+
+        Task<bool> IsMemberAsync(Guid projectId, Guid userId);
+
+        Task<bool> IsManagerAsync(Guid projectId, Guid userId);
     }
 }
