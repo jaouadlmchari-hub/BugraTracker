@@ -46,6 +46,14 @@ namespace BugTracker.Application.Services
                 .ToList();
         }
 
+        public async Task<ProjectMemberDto?> GetMemberAsync(Guid projectId, Guid userId)
+        {
+            var member = await _unitOfWork.ProjectMembers
+                .GetByProjectAndUserAsync(projectId, userId);
+
+            return member?.ToDto();
+        }
+
         public async Task<bool> ShareAnyProjectAsync(Guid firstUserId, Guid secondUserId)
         {
             return await _unitOfWork.ProjectMembers
