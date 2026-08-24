@@ -1,4 +1,5 @@
-﻿using BugTracker.Application.DTOs.Projects;
+﻿using BugTracker.Application.DTOs.Common;
+using BugTracker.Application.DTOs.Projects;
 using BugTracker.Domain.Entities;
 using System;
 using System.Collections.Generic;
@@ -13,6 +14,7 @@ namespace BugTracker.Application.Interfaces.Repositories
         Task<Project?> GetByKeyAsync(string key);
 
         Task<Project?> GetByIdWithMembersAsync(Guid projectId);
+
         Task<IEnumerable<Project>> GetByOwnerIdAsync(Guid ownerId);
 
         Task<IEnumerable<Project>> GetActiveProjectsAsync();
