@@ -17,7 +17,10 @@ namespace BugTracker.Infrastructure.Persistence.Repositories
         public async Task<ProjectMember?> GetByProjectAndUserAsync(Guid projectId, Guid userId)
         {
             return await _dbSet
-                         .FirstOrDefaultAsync(pm => pm.ProjectId == projectId && pm.UserId == userId);
+                  .Include(pm => pm.User)
+                  .FirstOrDefaultAsync(pm =>
+                      pm.ProjectId == projectId &&
+                      pm.UserId == userId);
         }
 
         public async Task<IEnumerable<ProjectMember>> GetByProjectIdAsync(Guid projectId)
