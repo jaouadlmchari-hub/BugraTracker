@@ -22,6 +22,8 @@ namespace BugTracker.Application.Interfaces.Repositories
 
         Task<bool> IsMemberAsync(Guid projectId, Guid userId);
 
+        Task<bool> IsManagerAsync(Guid projectId, Guid userId);
+
         Task<int> CountManagersAsync(Guid projectId);
     }
 }
