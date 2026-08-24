@@ -58,6 +58,14 @@ namespace BugTracker.Infrastructure.Persistence.Repositories
                          .AnyAsync(pm => pm.ProjectId == projectId && pm.UserId==userId);
         }
 
+        public async Task<bool> IsManagerAsync(Guid projectId, Guid userId)
+        {
+            return await _dbSet.AnyAsync(pm =>
+                pm.ProjectId == projectId &&
+                pm.UserId == userId &&
+                pm.Role == ProjectRole.Manager);
+        }
+
         public async Task<int> CountManagersAsync(Guid projectId)
         {
             return await _dbSet
