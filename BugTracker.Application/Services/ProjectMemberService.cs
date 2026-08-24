@@ -247,5 +247,17 @@ namespace BugTracker.Application.Services
             // 8. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
         }
+
+        public async Task<bool> IsMemberAsync(Guid projectId, Guid userId)
+        {
+            return await _unitOfWork.ProjectMembers
+                .IsMemberAsync(projectId, userId);
+        }
+
+        public async Task<bool> IsManagerAsync(Guid projectId, Guid userId)
+        {
+            return await _unitOfWork.ProjectMembers
+                .IsManagerAsync(projectId, userId);
+        }
     }
 }
