@@ -12,6 +12,8 @@ namespace BugTracker.Application.Interfaces.Services
     {
         Task<IEnumerable<ProjectMemberDto>> GetMembersAsync(Guid projectId);
 
+        Task<ProjectMemberDto?> GetMemberAsync(Guid projectId, Guid userId);
+
         Task<bool> ShareAnyProjectAsync(Guid firstUserId, Guid secondUserId);
 
         Task<ProjectMemberDto> AddMemberAsync(Guid projectId,AddProjectMemberDto dto);
