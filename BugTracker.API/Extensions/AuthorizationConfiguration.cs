@@ -16,12 +16,46 @@ public static class AuthorizationConfiguration
                 {
                     policy.RequireAuthenticatedUser();
 
-                    policy.AddRequirements(
+                    policy.AddRequirements( 
                         new CanViewUserRequirement());
                 });
+
+            options.AddPolicy(
+               "CanViewProject",
+               policy =>
+               {
+                   policy.RequireAuthenticatedUser();
+
+                   policy.AddRequirements(
+                        new CanViewProjectRequirement());
+               });
+
+            options.AddPolicy(
+               "CanManageProject",
+               policy =>
+               {
+                   policy.RequireAuthenticatedUser();
+             
+                   policy.AddRequirements( 
+                        new CanManageProjectRequirement());
+               });
+
+            options.AddPolicy(
+               "CanChangeProjectOwner",
+               policy =>
+               {
+                   policy.RequireAuthenticatedUser();
+
+                   policy.AddRequirements(
+                        new CanChangeProjectOwnerRequirement());
+               });
         });
 
         services.AddScoped<IAuthorizationHandler, CanViewUserHandler>();
+        services.AddScoped<IAuthorizationHandler, CanViewProjectHandler>();
+        services.AddScoped<IAuthorizationHandler, CanManageProjectHandler>();
+        services.AddScoped<IAuthorizationHandler, CanChangeProjectOwnerHandler>();
+
 
         return services;
     }
