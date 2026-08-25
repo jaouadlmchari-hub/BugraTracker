@@ -41,6 +41,36 @@ namespace BugTracker.Application.Services
             return epic.ToDetailsDto();
         }
 
+        public async Task<IEnumerable<EpicDto>> GetAllByProjectAsync(Guid projectId)
+        {
+            var project = await _unitOfWork.Projects.GetByIdAsync(projectId);
+
+            if (project == null)
+                throw new NotFoundException("Projet introuvable.");
+
+            var epics = await _unitOfWork.Epics
+                .GetByProjectIdAsync(projectId);
+
+            return epics
+                .Select(e => e.ToDto())
+                .ToList();
+        }
+
+        public async Task<IEnumerable<EpicDto>> GetActiveByProjectAsync(Guid projectId)
+        {
+            var project = await _unitOfWork.Projects.GetByIdAsync(projectId);
+
+            if (project == null)
+                throw new NotFoundException("Projet introuvable.");
+
+            var epics = await _unitOfWork.Epics
+                .GetActiveEpicsAsync(projectId);
+
+            return epics
+                .Select(e => e.ToDto())
+                .ToList();
+        }
+
         public async Task<EpicDto> CreateAsync(Guid projectId, CreateEpicDto dto)
         {
             // 1. Vérifier que le projet existe
@@ -95,6 +125,12 @@ namespace BugTracker.Application.Services
 
             if (epic == null)
                 throw new NotFoundException("Epic non trouvé.");
+
+            if (epic.Status == EpicStatus.Archived)
+            {
+                throw new BusinessRuleException(
+                    "Impossible de modifier un Epic archivé.");
+            }
 
             var currentUserId = _currentUserService.UserId;
 
