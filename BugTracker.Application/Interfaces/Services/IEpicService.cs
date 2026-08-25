@@ -18,6 +18,10 @@ namespace BugTracker.Application.Interfaces.Services
 
         Task<EpicDetailsDto?> GetByIdWithDetailsAsync(Guid epicId);
 
+        Task<IEnumerable<EpicDto>> GetAllByProjectAsync(Guid projectId);
+
+        Task<IEnumerable<EpicDto>> GetActiveByProjectAsync(Guid projectId);
+
         Task DeleteAsync(Guid epicId);
 
         Task ChangeStatusAsync(Guid epicId, EpicStatus newStatus);
