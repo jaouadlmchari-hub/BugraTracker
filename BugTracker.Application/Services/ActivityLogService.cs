@@ -1,5 +1,7 @@
-﻿using BugTracker.Application.Interfaces;
-using BugTracker.Application.Interfaces.Repositories;
+﻿using BugTracker.Application.DTOs.ActivityLogs;
+using BugTracker.Application.Exceptions;
+using BugTracker.Application.Interfaces.Persistence;
+using BugTracker.Application.Mappings;
 using BugTracker.Domain.Entities;
 using BugTracker.Domain.Enums;
 
@@ -32,5 +34,22 @@ public class ActivityLogService : IActivityLogService
         };
 
         await _unitOfWork.ActivityLogs.AddAsync(activityLog);
+    }
+
+    public async Task<IEnumerable<ActivityLogDto>> GetByIssueAsync(Guid issueId)
+    {
+        var issue = await _unitOfWork.Issues
+            .GetByIdAsync(issueId);
+
+        if (issue == null)
+            throw new NotFoundException(
+                "Issue non trouvée.");
+
+        var logs = await _unitOfWork.ActivityLogs
+            .GetByIssueIdAsync(issueId);
+
+        return logs
+            .Select(log => log.ToDto())
+            .ToList();
     }
 }

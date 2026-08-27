@@ -1,4 +1,4 @@
-﻿using BugTracker.Application.Interfaces;
+﻿using BugTracker.Application.Interfaces.Persistence;
 using BugTracker.Domain.Entities;
 
 namespace BugTracker.Application.Services;

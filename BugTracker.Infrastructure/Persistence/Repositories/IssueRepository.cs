@@ -18,62 +18,90 @@ namespace BugTracker.Infrastructure.Persistence.Repositories
                 .FirstOrDefaultAsync(i => i.Id == issueId);
         }
 
-        public async Task<IEnumerable<Issue>> GetByProjectIdAsync(Guid projectId)
+        public async Task<(IEnumerable<Issue> Items, int TotalCount)> GetPaginatedAsync(
+            Guid projectId, IssueFilterDto filter)
         {
-            return await _dbSet
-                .Where(i => i.ProjectId == projectId)
-                .Include(i => i.Reporter)
-                .Include(i => i.Assignee)
-                .ToListAsync();
-        }
+            IQueryable<Issue> query = _dbSet
+                .Where(i => i.ProjectId == projectId);
 
-        public async Task<IEnumerable<Issue>> GetBySprintIdAsync(Guid sprintId)
-        {
-            return await _dbSet
-                .Where(i => i.SprintId == sprintId)
-                .Include(i => i.Reporter)
-                .Include(i => i.Assignee)
-                .ToListAsync();
-        }
+            // Recherche
+            if (!string.IsNullOrWhiteSpace(filter.Search))
+            {
+                query = query.Where(i =>
+                    i.Title.Contains(filter.Search) ||
+                    (i.Description != null &&
+                     i.Description.Contains(filter.Search)));
+            }
 
-        public async Task<IEnumerable<Issue>> GetByAssigneeIdAsync(Guid assigneeId)
-        {
-            return await _dbSet
-                .Where(i => i.AssigneeId == assigneeId)
-                .Include(i => i.Reporter)
-                .Include(i => i.Assignee)
-                .ToListAsync();
-        }
+            // Statut
+            if (filter.Status.HasValue)
+            {
+                query = query.Where(i =>
+                    i.Status == filter.Status.Value);
+            }
 
-        public async Task<IEnumerable<Issue>> GetByReporterIdAsync(Guid reporterId)
-        {
-            return await _dbSet
-                .Where(i => i.ReporterId == reporterId)
-                .Include(i => i.Reporter)
-                .Include(i => i.Assignee)
-                .ToListAsync();
-        }
+            // Type
+            if (filter.Type.HasValue)
+            {
+                query = query.Where(i =>
+                    i.Type == filter.Type.Value);
+            }
 
-        public async Task<IEnumerable<Issue>> GetByStatusAsync(Guid projectId,IssueStatus status)
-        {
-            return await _dbSet
-                .Where(i =>
-                    i.ProjectId == projectId &&
-                    i.Status == status)
-                .Include(i => i.Reporter)
-                .Include(i => i.Assignee)
-                .ToListAsync();
-        }
+            // Priorité
+            if (filter.Priority.HasValue)
+            {
+                query = query.Where(i =>
+                    i.Priority == filter.Priority.Value);
+            }
 
-        public async Task<IEnumerable<Issue>> GetByPriorityAsync(Guid projectId,Priority priority)
-        {
-            return await _dbSet
-                .Where(i =>
-                    i.ProjectId == projectId &&
-                    i.Priority == priority)
+            // Assignee
+            if (filter.AssigneeId.HasValue)
+            {
+                query = query.Where(i =>
+                    i.AssigneeId == filter.AssigneeId.Value);
+            }
+
+            // Reporter
+            if (filter.ReporterId.HasValue)
+            {
+                query = query.Where(i =>
+                    i.ReporterId == filter.ReporterId.Value);
+            }
+
+            // Epic
+            if (filter.EpicId.HasValue)
+            {
+                query = query.Where(i =>
+                    i.EpicId == filter.EpicId.Value);
+            }
+
+            // Sprint
+            if (filter.SprintId.HasValue)
+            {
+                query = query.Where(i =>
+                    i.SprintId == filter.SprintId.Value);
+            }
+
+            // Backlog
+            if (filter.BacklogOnly == true)
+            {
+                query = query.Where(i =>
+                    i.SprintId == null);
+            }
+
+            // Nombre total APRÈS les filtres
+            var totalCount = await query.CountAsync();
+
+            // Relations nécessaires pour IssueDto
+            var items = await query
                 .Include(i => i.Reporter)
                 .Include(i => i.Assignee)
+                .OrderBy(i => i.DisplayOrder)
+                .Skip((filter.PageNumber - 1) * filter.PageSize)
+                .Take(filter.PageSize)
                 .ToListAsync();
+
+            return (items, totalCount);
         }
 
         public async Task<IEnumerable<Issue>> GetByProjectAndAssigneeAsync(Guid projectId,Guid userId)
@@ -94,6 +122,15 @@ namespace BugTracker.Infrastructure.Persistence.Repositories
                     i.SprintId == sprintId &&
                     (i.Status == IssueStatus.Todo ||
                      i.Status == IssueStatus.InProgress))
+                .ToListAsync();
+        }
+
+        public async Task<IEnumerable<Issue>> GetByIdsAsync(IEnumerable<Guid> issueIds)
+        {
+            var ids = issueIds.ToList();
+
+            return await _dbSet
+                .Where(i => ids.Contains(i.Id))
                 .ToListAsync();
         }
     }

@@ -1,4 +1,4 @@
-﻿using BugTracker.Application.Interfaces;
+﻿using BugTracker.Application.Interfaces.Persistence;
 using BugTracker.Application.Interfaces.Repositories;
 using BugTracker.Application.Interfaces.Services;
 using BugTracker.Infrastructure.Extensions;

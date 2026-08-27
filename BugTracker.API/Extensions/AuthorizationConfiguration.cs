@@ -49,12 +49,74 @@ public static class AuthorizationConfiguration
                    policy.AddRequirements(
                         new CanChangeProjectOwnerRequirement());
                });
+
+
+
+            options.AddPolicy(
+               "CanEditIssue",
+               policy =>
+               {
+                   policy.RequireAuthenticatedUser();
+
+                   policy.AddRequirements(
+                        new CanEditIssueRequirement());
+               });
+
+
+            options.AddPolicy(
+              "CanChangeIssueStatus",
+              policy =>
+              {
+                  policy.RequireAuthenticatedUser();
+
+                  policy.AddRequirements(
+                       new CanChangeIssueStatusRequirement());
+              });
+
+            options.AddPolicy(
+              "CanEditComment",
+              policy =>
+              {
+                  policy.RequireAuthenticatedUser();
+            
+                  policy.AddRequirements(
+                       new CanEditCommentRequirement());
+              });
+
+
+            options.AddPolicy(
+             "CanDeleteComment",
+             policy =>
+             {
+                 policy.RequireAuthenticatedUser();
+
+                 policy.AddRequirements(
+                      new CanDeleteCommentRequirement());
+             });
+
+
+            options.AddPolicy(
+           "CanDeleteAttachment",
+           policy =>
+           {
+               policy.RequireAuthenticatedUser();
+
+               policy.AddRequirements(
+                    new CanDeleteAttachmentRequirement());
+           });
+
+
         });
 
         services.AddScoped<IAuthorizationHandler, CanViewUserHandler>();
         services.AddScoped<IAuthorizationHandler, CanViewProjectHandler>();
         services.AddScoped<IAuthorizationHandler, CanManageProjectHandler>();
         services.AddScoped<IAuthorizationHandler, CanChangeProjectOwnerHandler>();
+        services.AddScoped<IAuthorizationHandler, CanEditIssueHandler>();
+        services.AddScoped<IAuthorizationHandler, CanChangeIssueStatusHandler>();
+        services.AddScoped<IAuthorizationHandler, CanEditCommentHandler>();
+        services.AddScoped<IAuthorizationHandler, CanDeleteCommentHandler>();
+        services.AddScoped<IAuthorizationHandler, CanDeleteAttachmentHandler>();
 
 
         return services;

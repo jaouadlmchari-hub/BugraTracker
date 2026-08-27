@@ -23,8 +23,10 @@ namespace BugTracker.Infrastructure.Persistence.Repositories
         public async Task<IEnumerable<ActivityLog>> GetByIssueIdAsync(Guid issueId)
         {
             return await _dbSet
-                         .Where(a => a.IssueId == issueId)
-                         .ToListAsync();
+                .Where(a => a.IssueId == issueId)
+                .Include(a => a.User)
+                .OrderBy(a => a.CreatedAt)
+                .ToListAsync();
         }
 
         public async Task<IEnumerable<ActivityLog>> GetByUserIdAsync(Guid projectId, Guid userId)

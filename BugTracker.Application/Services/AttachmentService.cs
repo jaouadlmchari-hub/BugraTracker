@@ -1,6 +1,6 @@
 ﻿using BugTracker.Application.DTOs.Attachments;
 using BugTracker.Application.Exceptions;
-using BugTracker.Application.Interfaces;
+using BugTracker.Application.Interfaces.Persistence;
 using BugTracker.Application.Interfaces.Services;
 using BugTracker.Application.Mappings;
 using BugTracker.Domain.Entities;
@@ -34,61 +34,110 @@ namespace BugTracker.Application.Services
             _logger = logger;
         }
 
+        private async Task<string> GenerateDownloadUrlAsync(Attachment attachment)
+        {
+            return await _fileStorageService.GenerateDownloadUrlAsync(
+                attachment.StorageKey,
+                TimeSpan.FromHours(1));
+        }
+
+        public async Task<AttachmentDto?> GetByIdAsync(Guid attachmentId)
+        {
+            var attachment = await _unitOfWork.Attachments
+                .GetByIdWithDetailsAsync(attachmentId);
+
+            if (attachment == null)
+                return null;
+
+            var downloadUrl =
+                await GenerateDownloadUrlAsync(attachment);
+
+            return attachment.ToDto(downloadUrl);
+        }
+
+        public async Task<IEnumerable<AttachmentDto>> GetByIssueAsync(Guid issueId)
+        {
+            var issue = await _unitOfWork.Issues
+                .GetByIdAsync(issueId);
+
+            if (issue == null)
+                throw new NotFoundException(
+                    "Issue non trouvée.");
+
+            var attachments = await _unitOfWork.Attachments
+                .GetByIssueIdAsync(issueId);
+
+            var result = new List<AttachmentDto>();
+
+            foreach (var attachment in attachments)
+            {
+                var downloadUrl =
+                    await GenerateDownloadUrlAsync(attachment);
+
+                result.Add(
+                    attachment.ToDto(downloadUrl));
+            }
+
+            return result;
+        }
+
         public async Task<AttachmentDto> UploadAsync(Guid issueId, CreateAttachmentDto dto)
         {
             // 1. Vérifier que l'Issue existe
-            var issue = await _unitOfWork.Issues.GetByIdAsync(issueId);
+            var issue = await _unitOfWork.Issues
+                .GetByIdAsync(issueId);
 
             if (issue == null)
-                throw new NotFoundException("Issue non trouvée.");
+                throw new NotFoundException(
+                    "Issue non trouvée.");
 
             // 2. Utilisateur connecté
-            var currentUserId = _currentUserService.UserId;
+            // Nécessaire pour UploaderId et ActivityLog
+            var currentUserId =
+                _currentUserService.UserId;
 
-            // 3. Vérifier que l'utilisateur est membre du projet
-            if (!_currentUserService.IsAdmin)
-            {
-                var currentMember = await _unitOfWork.ProjectMembers
-                    .GetByProjectAndUserAsync(issue.ProjectId, currentUserId);
 
-                if (currentMember == null)
-                {
-                    throw new ForbiddenException("L'utilisateur n'est pas membre du projet.");
-                }
-            }
-
-            // 4. Vérifier que le fichier existe
+            // 3. Vérifier qu'un fichier a été fourni
             if (dto.FileContent == null)
-                throw new BusinessRuleException("Aucun fichier fourni.");
+                throw new BusinessRuleException(
+                    "Aucun fichier fourni.");
 
-            // 5. Vérifier le nombre maximum de fichiers
-            var attachmentCount = await _unitOfWork.Attachments.CountByIssueIdAsync(issueId);
+            // 4. Vérifier le nombre maximum de fichiers
+            var attachmentCount =
+                await _unitOfWork.Attachments
+                    .CountByIssueIdAsync(issueId);
 
             if (attachmentCount >= 20)
             {
-                throw new BusinessRuleException("MAX_ATTACHMENTS_REACHED");
+                throw new BusinessRuleException(
+                    "MAX_ATTACHMENTS_REACHED");
             }
 
-            // 6. Valider le fichier (type, taille, signature/magic bytes)
+            // 5. Valider le fichier :
+            // type, taille, extension, magic bytes...
             await _fileValidationService.ValidateAsync(
                 dto.FileContent,
                 dto.FileName,
                 dto.ContentType);
 
+            // Revenir au début du Stream après validation
             if (dto.FileContent.CanSeek)
                 dto.FileContent.Position = 0;
 
-            // 7. Générer UUID + extension originale
-            var extension = Path.GetExtension(dto.FileName);
-            var storageKey = $"{Guid.NewGuid()}{extension}";
+            // 6. Générer une clé de stockage unique
+            var extension =
+                Path.GetExtension(dto.FileName);
 
-            // 8. Stocker dans Object Storage (MinIO / S3)
+            var storageKey =
+                $"{Guid.NewGuid()}{extension}";
+
+            // 7. Envoyer le vrai fichier vers MinIO / S3
             await _fileStorageService.UploadAsync(
                 dto.FileContent,
                 storageKey,
                 dto.ContentType);
 
-            // 9. Créer l'Attachment en BDD
+            // 8. Enregistrer uniquement les métadonnées en BDD
             var attachment = new Attachment
             {
                 IssueId = issueId,
@@ -99,78 +148,62 @@ namespace BugTracker.Application.Services
                 SizeBytes = dto.FileContent.Length
             };
 
-            await _unitOfWork.Attachments.AddAsync(attachment);
+            await _unitOfWork.Attachments
+                .AddAsync(attachment);
 
-            // 10. ActivityLog
-            await _activityLogService.LogAsync(issueId, currentUserId, ActivityAction.AttachmentAdded);
+            // 9. ActivityLog
+            await _activityLogService.LogAsync(
+                issueId,
+                currentUserId,
+                ActivityAction.AttachmentAdded);
 
-            // 11. Sauvegarder
+            // 10. Sauvegarder en BDD
             await _unitOfWork.SaveChangesAsync();
 
-            // 12. URL pré-signée valable 1 heure
-            var downloadUrl = await _fileStorageService.GenerateDownloadUrlAsync(
-                storageKey,
-                TimeSpan.FromHours(1));
+            // 11. Générer une URL pré-signée valable 1 heure
+            var downloadUrl =
+                await GenerateDownloadUrlAsync(attachment);
 
-            // 13. Retourner le DTO
+            // 12. Retourner le DTO
             return attachment.ToDto(downloadUrl);
         }
 
         public async Task<string> GetDownloadUrlAsync(Guid attachmentId)
         {
-            // 1. Récupérer l'attachment
-            var attachment = await _unitOfWork.Attachments.GetByIdWithDetailsAsync(attachmentId);
+            var attachment = await _unitOfWork.Attachments
+                .GetByIdAsync(attachmentId);
 
             if (attachment == null)
-                throw new NotFoundException("Pièce jointe non trouvée.");
+                throw new NotFoundException(
+                    "Pièce jointe non trouvée.");
 
-            // 2. Récupérer l'utilisateur connecté
-            var currentUserId = _currentUserService.UserId;
 
-            // 3. Vérifier que l'utilisateur est membre du projet
-            if (!_currentUserService.IsAdmin)
-            {
-                var currentMember = await _unitOfWork.ProjectMembers
-                    .GetByProjectAndUserAsync(attachment.Issue.ProjectId, currentUserId);
-
-                if (currentMember == null)
-                {
-                    throw new ForbiddenException("L'utilisateur n'est pas membre du projet.");
-                }
-            }
-
-            // 4. Générer une URL temporaire
-            return await _fileStorageService.GenerateDownloadUrlAsync(
-                attachment.StorageKey,
-                TimeSpan.FromHours(1));
+            return await GenerateDownloadUrlAsync(
+                attachment);
         }
 
         public async Task DeleteAsync(Guid attachmentId)
         {
-            // 1. Récupérer l'Attachment avec son Issue
-            var attachment = await _unitOfWork.Attachments.GetByIdWithDetailsAsync(attachmentId);
+            // 1. Récupérer l'Attachment
+            var attachment = await _unitOfWork.Attachments
+                .GetByIdAsync(attachmentId);
 
             if (attachment == null)
-                throw new NotFoundException("Pièce jointe non trouvée.");
+                throw new NotFoundException(
+                    "Pièce jointe non trouvée.");
 
-            var currentUserId = _currentUserService.UserId;
 
-            // 2. Vérifier les permissions (Manager du projet ou Admin)
-            if (!_currentUserService.IsAdmin)
-            {
-                var currentMember = await _unitOfWork.ProjectMembers
-                    .GetByProjectAndUserAsync(attachment.Issue.ProjectId, currentUserId);
+            var currentUserId =
+                _currentUserService.UserId;
 
-                if (currentMember == null || currentMember.Role != ProjectRole.Manager)
-                {
-                    throw new ForbiddenException("Seuls le PM et l'Admin peuvent supprimer une pièce jointe.");
-                }
-            }
+            var storageKey =
+                attachment.StorageKey;
 
-            var storageKey = attachment.StorageKey;
+            // 2. Supprimer les métadonnées de la BDD
+            _unitOfWork.Attachments.Delete(
+                attachment);
 
-            _unitOfWork.Attachments.Delete(attachment);
-
+            // 3. ActivityLog
             await _activityLogService.LogAsync(
                 attachment.IssueId,
                 currentUserId,
@@ -179,13 +212,14 @@ namespace BugTracker.Application.Services
                 storageKey,
                 null);
 
-            // 3. Valider la transaction BDD d'abord
+            // 4. Valider d'abord la suppression BDD
             await _unitOfWork.SaveChangesAsync();
 
-            // 4. Supprimer du stockage S3/MinIO après succès BDD
+            // 5. Puis supprimer le vrai fichier de MinIO / S3
             try
             {
-                await _fileStorageService.DeleteAsync(storageKey);
+                await _fileStorageService.DeleteAsync(
+                    storageKey);
             }
             catch (Exception ex)
             {

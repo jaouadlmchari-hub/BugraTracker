@@ -1,10 +1,6 @@
-﻿using BugTracker.Application.Interfaces;
+﻿using BugTracker.Application.Interfaces.Persistence;
 using BugTracker.Application.Interfaces.Repositories;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+
 
 namespace BugTracker.Infrastructure.Persistence
 {
@@ -48,6 +44,14 @@ namespace BugTracker.Infrastructure.Persistence
             Attachments = attachments;
             ActivityLogs = activityLogs;
             RefreshTokens = refreshTokens;
+        }
+
+
+        public async Task<ITransaction> BeginTransactionAsync()
+        {
+            var transaction = await _context.Database.BeginTransactionAsync();
+
+            return new EfTransaction(transaction);
         }
 
         public Task<int> SaveChangesAsync()

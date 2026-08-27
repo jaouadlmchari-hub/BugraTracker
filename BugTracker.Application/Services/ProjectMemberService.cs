@@ -1,6 +1,6 @@
 ﻿using BugTracker.Application.DTOs.ProjectMembers;
 using BugTracker.Application.Exceptions;
-using BugTracker.Application.Interfaces;
+using BugTracker.Application.Interfaces.Persistence;
 using BugTracker.Application.Interfaces.Services;
 using BugTracker.Application.Mappings;
 using BugTracker.Domain.Entities;

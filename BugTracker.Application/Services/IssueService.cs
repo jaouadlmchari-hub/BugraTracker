@@ -1,6 +1,7 @@
-﻿using BugTracker.Application.DTOs.Issues;
+﻿using BugTracker.Application.DTOs.Common;
+using BugTracker.Application.DTOs.Issues;
 using BugTracker.Application.Exceptions;
-using BugTracker.Application.Interfaces;
+using BugTracker.Application.Interfaces.Persistence;
 using BugTracker.Application.Interfaces.Services;
 using BugTracker.Application.Mappings;
 using BugTracker.Domain.Entities;
@@ -33,97 +34,140 @@ namespace BugTracker.Application.Services
             return issue.ToDto();
         }
 
-        public async Task<IEnumerable<IssueDto>> GetByProjectAsync(Guid projectId)
+        public async Task<PagedResultDto<IssueDto>> GetByProjectPaginatedAsync(
+            Guid projectId, IssueFilterDto filter)
         {
-            var issues = await _unitOfWork.Issues
-                .GetByProjectIdAsync(projectId);
+            var projectExists =
+                await _unitOfWork.Projects.ExistsAsync(projectId);
 
-            return issues
-                .Select(i => i.ToDto())
-                .ToList();
+            if (!projectExists)
+                throw new NotFoundException("Projet introuvable.");
+
+            var (issues, totalCount) =
+                await _unitOfWork.Issues.GetPaginatedAsync(
+                    projectId,
+                    filter);
+
+            return new PagedResultDto<IssueDto>
+            {
+                Items = issues
+                    .Select(i => i.ToDto())
+                    .ToList(),
+
+                TotalCount = totalCount,
+                PageNumber = filter.PageNumber,
+                PageSize = filter.PageSize
+            };
+        }
+
+
+        private async Task ValidateEpicAsync(Guid projectId, Guid epicId)
+        {
+            var epic = await _unitOfWork.Epics.GetByIdAsync(epicId);
+
+            if (epic == null)
+                throw new NotFoundException("Epic non trouvé.");
+
+            if (epic.ProjectId != projectId)
+                throw new BusinessRuleException(
+                    "L'Epic n'appartient pas au même projet que l'Issue.");
+
+            if (epic.Status == EpicStatus.Archived)
+                throw new BusinessRuleException(
+                    "Impossible d'affecter une Issue à un Epic archivé.");
         }
 
         public async Task<IssueDto> CreateAsync(Guid projectId, CreateIssueDto dto)
         {
-            // 1. Vérifier que le projet existe
-            var project = await _unitOfWork.Projects
-                .GetByIdAsync(projectId);
+            await using var transaction =
+                await _unitOfWork.BeginTransactionAsync();
 
-            if (project == null)
-                throw new NotFoundException("Projet non trouvé.");
-
-            // 2. Vérifier que l'utilisateur connecté est membre du projet
-            var currentUserId = _currentUserService.UserId;
-
-            var currentMember = await _unitOfWork.ProjectMembers
-                .GetByProjectAndUserAsync(projectId, currentUserId);
-
-            if (currentMember == null)
-                throw new ForbiddenException(
-                    "Vous devez être membre du projet pour créer un ticket.");
-
-            // 3. Si un Sprint est fourni, vérifier qu'il existe et qu'il appartient au même projet
-            Sprint? sprint = null;
-
-            if (dto.SprintId.HasValue)
+            try
             {
-                sprint = await _unitOfWork.Sprints
-                    .GetByIdAsync(dto.SprintId.Value);
+                var project = await _unitOfWork.Projects
+                    .GetByIdAsync(projectId);
 
-                if (sprint == null)
-                    throw new NotFoundException("Sprint non trouvé.");
+                if (project == null)
+                    throw new NotFoundException("Projet non trouvé.");
 
-                if (sprint.ProjectId != projectId)
-                    throw new BusinessRuleException(
-                        "Le sprint n'appartient pas à ce projet.");
+                var currentUserId = _currentUserService.UserId;
+
+                if (dto.SprintId.HasValue)
+                {
+                    var sprint = await _unitOfWork.Sprints
+                        .GetByIdAsync(dto.SprintId.Value);
+
+                    if (sprint == null)
+                        throw new NotFoundException("Sprint non trouvé.");
+
+                    if (sprint.ProjectId != projectId)
+                        throw new BusinessRuleException(
+                            "Le sprint n'appartient pas à ce projet.");
+                }
+
+                if (dto.EpicId.HasValue)
+                {
+                    await ValidateEpicAsync(projectId, dto.EpicId.Value);
+                }
+
+                if (dto.AssigneeId.HasValue)
+                {
+                    var assignee = await _unitOfWork.ProjectMembers
+                        .GetByProjectAndUserAsync(
+                            projectId,
+                            dto.AssigneeId.Value);
+
+                    if (assignee == null)
+                        throw new BusinessRuleException(
+                            "L'utilisateur assigné doit être membre du projet.");
+                }
+
+                var issue = new Issue
+                {
+                    ProjectId = projectId,
+                    Title = dto.Title,
+                    Description = dto.Description,
+                    Type = dto.Type,
+                    Priority = dto.Priority ?? Priority.Medium,
+                    Status = IssueStatus.Todo,
+                    StoryPoints = dto.StoryPoints,
+                    DueDate = dto.DueDate,
+                    EpicId = dto.EpicId,
+                    SprintId = dto.SprintId,
+                    ReporterId = currentUserId,
+                    AssigneeId = dto.AssigneeId,
+                    DisplayOrder = 0
+                };
+
+                await _unitOfWork.Issues.AddAsync(issue);
+
+                // Premier SaveChanges :
+                // SQL Server génère l'Id avec NEWID()
+                await _unitOfWork.SaveChangesAsync();
+
+                await _activityLogService.LogAsync(
+                    issue.Id,
+                    currentUserId,
+                    ActivityAction.Created);
+
+                await _unitOfWork.SaveChangesAsync();
+
+                await transaction.CommitAsync();
+
+                var createdIssue =
+                    await _unitOfWork.Issues.GetByIdWithDetailsAsync(issue.Id);
+
+                if (createdIssue == null)
+                    throw new NotFoundException(
+                        "Impossible de récupérer l'issue créée.");
+
+                return createdIssue.ToDto();
             }
-
-            // 4. Si un Assignee est fourni, vérifier qu'il est membre du projet
-            if (dto.AssigneeId.HasValue)
+            catch
             {
-                var assignee = await _unitOfWork.ProjectMembers
-                    .GetByProjectAndUserAsync(
-                        projectId,
-                        dto.AssigneeId.Value);
-
-                if (assignee == null)
-                    throw new BusinessRuleException(
-                        "L'utilisateur assigné doit être membre du projet.");
+                await transaction.RollbackAsync();
+                throw;
             }
-
-            // 5. Créer l'Issue
-            var issue = new Issue
-            {
-                ProjectId = projectId,
-                Title = dto.Title,
-                Description = dto.Description,
-                Type = dto.Type,
-                Priority = dto.Priority ?? Priority.Medium,
-                Status = IssueStatus.Todo,
-                StoryPoints = dto.StoryPoints,
-                DueDate = dto.DueDate,
-                EpicId = dto.EpicId,
-                SprintId = dto.SprintId,
-                ReporterId = currentUserId,
-                AssigneeId = dto.AssigneeId,
-                DisplayOrder = 0
-            };
-
-            await _unitOfWork.Issues.AddAsync(issue);
-
-            // 6. Créer le ActivityLog "created"
-            await _activityLogService.LogAsync(issue.Id, currentUserId, ActivityAction.Created);
-
-            await _unitOfWork.SaveChangesAsync();
-
-            // 7. Charger les navigations nécessaires au mapping
-            var createdIssue = await _unitOfWork.Issues.GetByIdWithDetailsAsync(issue.Id);
-
-            if (createdIssue == null)
-                throw new NotFoundException(
-                    "Impossible de récupérer l'issue créée.");
-
-            return createdIssue.ToDto();
         }
 
         public async Task<IssueDto> UpdateAsync(Guid issueId, UpdateIssueDto dto)
@@ -135,47 +179,28 @@ namespace BugTracker.Application.Services
             if (issue == null)
                 throw new NotFoundException("Issue non trouvée.");
 
-            // 2. Vérifier les droits de modification
-            var currentUserId = _currentUserService.UserId;
-
-            if (!_currentUserService.IsAdmin)
-            {
-                var currentMember = await _unitOfWork.ProjectMembers
-                    .GetByProjectAndUserAsync(
-                        issue.ProjectId,
-                        currentUserId);
-
-                if (currentMember == null)
-                {
-                    throw new ForbiddenException(
-                        "Vous n'êtes pas membre de ce projet.");
-                }
-
-                var canUpdate =
-                    issue.ReporterId == currentUserId ||
-                    issue.AssigneeId == currentUserId ||
-                    currentMember.Role == ProjectRole.Manager;
-
-                if (!canUpdate)
-                {
-                    throw new ForbiddenException(
-                        "Vous n'avez pas les droits pour modifier cette issue.");
-                }
-            }
-
-            // 3. Modifier les propriétés
+            // 2. Modifier les propriétés
             issue.Title = dto.Title;
             issue.Description = dto.Description;
             issue.Type = dto.Type;
             issue.Priority = dto.Priority;
             issue.StoryPoints = dto.StoryPoints;
             issue.DueDate = dto.DueDate;
-            issue.EpicId = dto.EpicId;
 
-            // 4. Sauvegarder
+            if (dto.EpicId != issue.EpicId)
+            {
+                if (dto.EpicId.HasValue)
+                {
+                    await ValidateEpicAsync(issue.ProjectId, dto.EpicId.Value);
+                }
+
+                issue.EpicId = dto.EpicId;
+            }
+
+            // 3. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
 
-            // 5. Recharger les navigations nécessaires au mapping
+            // 4. Recharger les navigations nécessaires au mapping
             var updatedIssue = await _unitOfWork.Issues
                 .GetByIdWithDetailsAsync(issueId);
 
@@ -216,46 +241,31 @@ namespace BugTracker.Application.Services
                 }
             }
 
-            // 4. Vérifier les droits de l'utilisateur
             var currentUserId = _currentUserService.UserId;
 
-            if (!_currentUserService.IsAdmin)
+            // 4. Règle spéciale : Done → Todo
+            // L'autorisation générale est gérée par CanChangeIssueStatus,
+            // mais la réouverture reste limitée aux QA (sur Bug), PM et Admin.
+            if (issue.Status == IssueStatus.Done &&
+                newStatus == IssueStatus.Todo &&
+                !_currentUserService.IsAdmin)
             {
                 var currentMember = await _unitOfWork.ProjectMembers
                     .GetByProjectAndUserAsync(
                         issue.ProjectId,
                         currentUserId);
 
-                if (currentMember == null)
-                {
+                var canReopen =
+                    currentMember != null &&
+                    (
+                        currentMember.Role == ProjectRole.Manager ||
+                        (currentMember.Role == ProjectRole.QA &&
+                         issue.Type == IssueType.Bug)
+                    );
+
+                if (!canReopen)
                     throw new ForbiddenException(
-                        "Vous n'êtes pas membre de ce projet.");
-                }
-
-                var isManager = currentMember.Role == ProjectRole.Manager;
-                var isQA = currentMember.Role == ProjectRole.QA;
-                var isAssignee = issue.AssigneeId == currentUserId;
-                var isQABug = isQA && issue.Type == IssueType.Bug;
-
-                // Réouverture : Done → Todo
-                if (issue.Status == IssueStatus.Done &&
-                    newStatus == IssueStatus.Todo)
-                {
-                    if (!isQABug && !isManager)
-                    {
-                        throw new ForbiddenException(
-                            "Seuls les QA, PM et Admin peuvent rouvrir une issue.");
-                    }
-                }
-                // Workflow normal
-                else
-                {
-                    if (!isAssignee && !isManager && !isQABug)
-                    {
-                        throw new ForbiddenException(
-                            "Vous n'avez pas les droits pour changer le statut de cette issue.");
-                    }
-                }
+                        "Seuls les QA, PM et Admin peuvent rouvrir cette issue.");
             }
 
             // 5. Vérifier la transition
@@ -284,6 +294,20 @@ namespace BugTracker.Application.Services
             await _unitOfWork.SaveChangesAsync();
         }
 
+        public async Task ChangeStoryPointsAsync(Guid issueId, int? storyPoints)
+        {
+            var issue = await _unitOfWork.Issues
+                .GetByIdAsync(issueId);
+
+            if (issue == null)
+                throw new NotFoundException("Issue non trouvée.");
+
+
+            issue.StoryPoints = storyPoints;
+
+            await _unitOfWork.SaveChangesAsync();
+        }
+
         private static bool IsValidTransition(IssueStatus currentStatus, IssueStatus newStatus)
         {
             return (currentStatus == IssueStatus.Todo &&
@@ -308,23 +332,8 @@ namespace BugTracker.Application.Services
             if (issue == null)
                 throw new NotFoundException("Issue non trouvée.");
 
-            // 2. Vérifier les droits de l'utilisateur connecté
+            // 2. Utilisateur courant nécessaire pour l'ActivityLog
             var currentUserId = _currentUserService.UserId;
-
-            if (!_currentUserService.IsAdmin)
-            {
-                var currentMember = await _unitOfWork.ProjectMembers
-                    .GetByProjectAndUserAsync(
-                        issue.ProjectId,
-                        currentUserId);
-
-                if (currentMember == null ||
-                    currentMember.Role != ProjectRole.Manager)
-                {
-                    throw new ForbiddenException(
-                        "Seuls les PM et Admin peuvent assigner une issue.");
-                }
-            }
 
             // 3. Vérifier que l'utilisateur cible est membre du projet
             var targetMember = await _unitOfWork.ProjectMembers
@@ -373,21 +382,6 @@ namespace BugTracker.Application.Services
                 throw new NotFoundException("Issue non trouvée.");
 
             var currentUserId = _currentUserService.UserId;
-
-            if (!_currentUserService.IsAdmin)
-            {
-                var currentMember = await _unitOfWork.ProjectMembers
-                    .GetByProjectAndUserAsync(
-                        issue.ProjectId,
-                        currentUserId);
-
-                if (currentMember == null ||
-                    currentMember.Role != ProjectRole.Manager)
-                {
-                    throw new ForbiddenException(
-                        "Seuls les PM et Admin peuvent déplacer une issue vers un sprint.");
-                }
-            }
 
             var previousSprintId = issue.SprintId;
 
@@ -441,6 +435,73 @@ namespace BugTracker.Application.Services
             await _unitOfWork.SaveChangesAsync();
         }
 
+        public async Task MoveToEpicAsync(Guid issueId, Guid? epicId)
+        {
+            var issue = await _unitOfWork.Issues
+                .GetByIdAsync(issueId);
+
+            if (issue == null)
+                throw new NotFoundException("Issue non trouvée.");
+
+            if (epicId.HasValue)
+            {
+                await ValidateEpicAsync(
+                    issue.ProjectId,
+                    epicId.Value);
+            }
+
+            issue.EpicId = epicId;
+
+            await _unitOfWork.SaveChangesAsync();
+        }
+
+        public async Task ReorderAsync(IEnumerable<ReorderIssueItemDto> items)
+        {
+            var reorderItems = items.ToList();
+
+            if (reorderItems.Count == 0)
+                throw new BusinessRuleException(
+                    "La liste des Issues à réordonner est vide.");
+
+            // Vérifier qu'un IssueId n'est pas envoyé plusieurs fois
+            if (reorderItems
+                .GroupBy(x => x.IssueId)
+                .Any(g => g.Count() > 1))
+            {
+                throw new BusinessRuleException(
+                    "Une même Issue ne peut pas apparaître plusieurs fois.");
+            }
+
+            // Récupérer toutes les Issues en une seule requête
+            var issueIds = reorderItems
+                .Select(x => x.IssueId)
+                .ToList();
+
+            var issues = (await _unitOfWork.Issues
+                .GetByIdsAsync(issueIds))
+                .ToList();
+
+            // Vérifier que toutes existent
+            if (issues.Count != issueIds.Count)
+                throw new NotFoundException(
+                    "Une ou plusieurs Issues sont introuvables.");
+
+            // Pour l'instant, un reorder concerne un seul projet
+            if (issues.Select(i => i.ProjectId).Distinct().Count() > 1)
+                throw new BusinessRuleException(
+                    "Les Issues à réordonner doivent appartenir au même projet.");
+
+            foreach (var item in reorderItems)
+            {
+                var issue = issues.First(i => i.Id == item.IssueId);
+
+                issue.DisplayOrder = item.DisplayOrder;
+            }
+
+            // Une seule sauvegarde pour toutes les Issues
+            await _unitOfWork.SaveChangesAsync();
+        }
+
         public async Task DeleteAsync(Guid issueId)
         {
             // 1. Récupérer l'Issue
@@ -450,28 +511,10 @@ namespace BugTracker.Application.Services
             if (issue == null)
                 throw new NotFoundException("Issue non trouvée.");
 
-            // 2. Vérifier les droits
-            var currentUserId = _currentUserService.UserId;
-
-            if (!_currentUserService.IsAdmin)
-            {
-                var currentMember = await _unitOfWork.ProjectMembers
-                    .GetByProjectAndUserAsync(
-                        issue.ProjectId,
-                        currentUserId);
-
-                if (currentMember == null ||
-                    currentMember.Role != ProjectRole.Manager)
-                {
-                    throw new ForbiddenException(
-                        "Seuls les PM et Admin peuvent supprimer une issue.");
-                }
-            }
-
-            // 3. Supprimer l'Issue
+            // 2. Supprimer l'Issue
             _unitOfWork.Issues.Delete(issue);
 
-            // 4. Sauvegarder
+            // 3. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
         }
     }

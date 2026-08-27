@@ -38,7 +38,8 @@ public class S3FileStorageService : IFileStorageService
         {
             BucketName = _bucketName,
             Key = storageFileName,
-            Expires = DateTime.UtcNow.Add(expiration)
+            Expires = DateTime.UtcNow.Add(expiration),
+            Protocol = Protocol.HTTP
         };
 
         var url = _s3Client.GetPreSignedURL(request);
