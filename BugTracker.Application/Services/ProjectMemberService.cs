@@ -11,35 +11,24 @@ namespace BugTracker.Application.Services
     public class ProjectMemberService : IProjectMemberService
     {
         private readonly IUnitOfWork _unitOfWork;
-        private readonly ICurrentUserService _currentUserService;
 
-        public ProjectMemberService(IUnitOfWork unitOfWork, ICurrentUserService currentUserService)
+        public ProjectMemberService(IUnitOfWork unitOfWork)
         {
             _unitOfWork = unitOfWork;
-            _currentUserService = currentUserService;
         }
 
         public async Task<IEnumerable<ProjectMemberDto>> GetMembersAsync(Guid projectId)
         {
-            var project = await _unitOfWork.Projects.GetByIdAsync(projectId);
+            var project = await _unitOfWork.Projects
+                .GetByIdAsync(projectId);
 
             if (project == null)
-                throw new NotFoundException("Projet non trouvé.");
+                throw new NotFoundException(
+                    "Projet non trouvé.");
+
 
             var members = await _unitOfWork.ProjectMembers
                 .GetByProjectIdAsync(projectId);
-
-            if (!_currentUserService.IsAdmin)
-            {
-                var isMember = members.Any(
-                    m => m.UserId == _currentUserService.UserId);
-
-                if (!isMember)
-                {
-                    throw new ForbiddenException(
-                        "Vous n'avez pas accès aux membres de ce projet.");
-                }
-            }
 
             return members
                 .Select(m => m.ToDto())
@@ -54,7 +43,7 @@ namespace BugTracker.Application.Services
             return member?.ToDto();
         }
 
-        public async Task<bool> ShareAnyProjectAsync(Guid firstUserId, Guid secondUserId)
+        public async Task<bool> ShareAnyProjectAsync(Guid firstUserId,  Guid secondUserId)
         {
             return await _unitOfWork.ProjectMembers
                 .ShareAnyProjectAsync(
@@ -64,49 +53,43 @@ namespace BugTracker.Application.Services
 
         public async Task<ProjectMemberDto> AddMemberAsync(Guid projectId, AddProjectMemberDto dto)
         {
-            var project = await _unitOfWork.Projects.GetByIdAsync(projectId);
+            // 1. Vérifier que le projet existe
+            var project = await _unitOfWork.Projects
+                .GetByIdAsync(projectId);
 
             if (project == null)
-                throw new NotFoundException("Projet non trouvé.");
+                throw new NotFoundException(
+                    "Projet non trouvé.");
 
-            // 2. Vérifier les permissions
-            if (!_currentUserService.IsAdmin)
-            {
-                var currentMember = await _unitOfWork.ProjectMembers
-                    .GetByProjectAndUserAsync(
-                        projectId,
-                        _currentUserService.UserId);
 
-                if (currentMember == null || currentMember.Role != ProjectRole.Manager)
-                {
-                    throw new ForbiddenException(
-                        "Vous n'avez pas les droits pour ajouter un membre à ce projet.");
-                }
-            }
-
-            // 3. Un projet archivé ne peut plus recevoir de membres
+            // 2. Projet archivé
             if (project.Status == ProjectStatus.Archived)
             {
                 throw new BusinessRuleException(
                     "Un projet archivé ne peut plus recevoir de nouveaux membres.");
             }
 
-            // 4. Vérifier que l'utilisateur existe
-            var user = await _unitOfWork.Users.GetByIdAsync(dto.UserId);
+            // 3. Vérifier que l'utilisateur existe
+            var user = await _unitOfWork.Users
+                .GetByIdAsync(dto.UserId);
 
             if (user == null)
-                throw new NotFoundException("Utilisateur non trouvé.");
+                throw new NotFoundException(
+                    "Utilisateur non trouvé.");
 
-            // 5. Vérifier que l'utilisateur est actif
+            // 4. L'utilisateur doit être actif
             if (!user.IsActive)
             {
                 throw new BusinessRuleException(
                     "Impossible d'ajouter un utilisateur désactivé.");
             }
 
-            // 6. Vérifier qu'il n'est pas déjà membre
-            var existingMember = await _unitOfWork.ProjectMembers
-                .GetByProjectAndUserAsync(projectId, dto.UserId);
+            // 5. Ne pas ajouter deux fois le même membre
+            var existingMember =
+                await _unitOfWork.ProjectMembers
+                    .GetByProjectAndUserAsync(
+                        projectId,
+                        dto.UserId);
 
             if (existingMember != null)
             {
@@ -114,7 +97,7 @@ namespace BugTracker.Application.Services
                     "Cet utilisateur est déjà membre de ce projet.");
             }
 
-            // 7. Création du membre
+            // 6. Créer le membre
             var projectMember = new ProjectMember
             {
                 ProjectId = projectId,
@@ -122,12 +105,13 @@ namespace BugTracker.Application.Services
                 Role = dto.Role
             };
 
-            await _unitOfWork.ProjectMembers.AddAsync(projectMember);
+            await _unitOfWork.ProjectMembers
+                .AddAsync(projectMember);
 
-            // 8. Sauvegarde
+            // 7. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
 
-            // Pour le mapping Username / FullName
+            // Nécessaire au mapping Username / FullName
             projectMember.User = user;
 
             return projectMember.ToDto();
@@ -135,54 +119,59 @@ namespace BugTracker.Application.Services
 
         public async Task ChangeRoleAsync(Guid projectId, Guid userId, ProjectRole newRole)
         {
-            // 1. Récupérer le projet
-            var project = await _unitOfWork.Projects.GetByIdAsync(projectId);
+            // 1. Vérifier le projet
+            var project = await _unitOfWork.Projects
+                .GetByIdAsync(projectId);
 
             if (project == null)
-                throw new NotFoundException("Projet non trouvé.");
+                throw new NotFoundException(
+                    "Projet non trouvé.");
 
+            // 2. Projet archivé
             if (project.Status == ProjectStatus.Archived)
             {
-                throw new BusinessRuleException("Un projet archivé ne peut plus être modifié.");
+                throw new BusinessRuleException(
+                    "Un projet archivé ne peut plus être modifié.");
             }
 
-            // 2. Vérification des droits de l'utilisateur CONNECTÉ
-            if (!_currentUserService.IsAdmin)
-            {
-                var currentUserId = _currentUserService.UserId;
-                var currentMember = await _unitOfWork.ProjectMembers
-                    .GetByProjectAndUserAsync(projectId, currentUserId);
 
-                if (currentMember == null || currentMember.Role != ProjectRole.Manager)
-                {
-                    throw new ForbiddenException(
-                        "Vous n'avez pas les droits pour modifier le rôle d'un membre.");
-                }
-            }
-
-            // 3. Récupération du membre CIBLE
-            var memberToUpdate = await _unitOfWork.ProjectMembers
-                .GetByProjectAndUserAsync(projectId, userId);
+            // 3. Récupérer le membre cible
+            var memberToUpdate =
+                await _unitOfWork.ProjectMembers
+                    .GetByProjectAndUserAsync(
+                        projectId,
+                        userId);
 
             if (memberToUpdate == null)
-                throw new NotFoundException("Cet utilisateur n'est pas membre de ce projet.");
-
-            if (memberToUpdate.Role == newRole)
-                throw new BusinessRuleException("L'utilisateur possède déjà ce rôle.");
-
-            // 4. Règle métier : Empêcher de rétrograder le dernier Manager
-            if (memberToUpdate.Role == ProjectRole.Manager && newRole != ProjectRole.Manager)
             {
-                var managerCount = await _unitOfWork.ProjectMembers.CountManagersAsync(projectId);
+                throw new NotFoundException(
+                    "Cet utilisateur n'est pas membre de ce projet.");
+            }
+
+            // 4. Même rôle
+            if (memberToUpdate.Role == newRole)
+            {
+                throw new BusinessRuleException(
+                    "L'utilisateur possède déjà ce rôle.");
+            }
+
+            // 5. Le projet doit toujours avoir au moins un Manager
+            if (memberToUpdate.Role == ProjectRole.Manager &&
+                newRole != ProjectRole.Manager)
+            {
+                var managerCount =
+                    await _unitOfWork.ProjectMembers
+                        .CountManagersAsync(projectId);
 
                 if (managerCount <= 1)
                 {
                     throw new BusinessRuleException(
-                        "Impossible de modifier le rôle. Le projet doit conserver au moins un Manager.");
+                        "Impossible de modifier le rôle. " +
+                        "Le projet doit conserver au moins un Manager.");
                 }
             }
 
-            // 5. Mise à jour
+            // 6. Modifier
             memberToUpdate.Role = newRole;
 
             await _unitOfWork.SaveChangesAsync();
@@ -190,37 +179,28 @@ namespace BugTracker.Application.Services
 
         public async Task RemoveMemberAsync(Guid projectId, Guid userId)
         {
-            // 1. Vérifier que le projet existe
-            var project = await _unitOfWork.Projects.GetByIdAsync(projectId);
+            // 1. Vérifier le projet
+            var project = await _unitOfWork.Projects
+                .GetByIdAsync(projectId);
 
             if (project == null)
-                throw new NotFoundException("Projet non trouvé.");
+                throw new NotFoundException(
+                    "Projet non trouvé.");
 
-            // 2. Un projet archivé ne peut plus être modifié
+            // 2. Projet archivé
             if (project.Status == ProjectStatus.Archived)
             {
                 throw new BusinessRuleException(
                     "Un projet archivé ne peut plus être modifié.");
             }
 
-            // 3. Vérifier les droits de l'utilisateur connecté
-            if (!_currentUserService.IsAdmin)
-            {
-                var currentMember = await _unitOfWork.ProjectMembers
+
+            // 3. Récupérer le membre cible
+            var memberToRemove =
+                await _unitOfWork.ProjectMembers
                     .GetByProjectAndUserAsync(
                         projectId,
-                        _currentUserService.UserId);
-
-                if (currentMember == null || currentMember.Role != ProjectRole.Manager)
-                {
-                    throw new ForbiddenException(
-                        "Vous n'avez pas les droits pour retirer un membre.");
-                }
-            }
-
-            // 4. Récupérer le membre à retirer
-            var memberToRemove = await _unitOfWork.ProjectMembers
-                .GetByProjectAndUserAsync(projectId, userId);
+                        userId);
 
             if (memberToRemove == null)
             {
@@ -228,10 +208,20 @@ namespace BugTracker.Application.Services
                     "Cet utilisateur n'est pas membre de ce projet.");
             }
 
-            // 5. Empêcher la suppression du dernier Manager
+            // 4. Le Owner ne peut pas être retiré directement
+            if (project.OwnerId == userId)
+            {
+                throw new BusinessRuleException(
+                    "Impossible de retirer le propriétaire du projet. " +
+                    "Transférez d'abord la propriété du projet.");
+            }
+
+            // 5. Toujours conserver au moins un Manager
             if (memberToRemove.Role == ProjectRole.Manager)
             {
-                var managerCount = await _unitOfWork.ProjectMembers.CountManagersAsync(projectId);
+                var managerCount =
+                    await _unitOfWork.ProjectMembers
+                        .CountManagersAsync(projectId);
 
                 if (managerCount <= 1)
                 {
@@ -240,9 +230,12 @@ namespace BugTracker.Application.Services
                 }
             }
 
-            // 6. Supprimer l'assignation aux tickets
-            var assignedIssues = await _unitOfWork.Issues
-                .GetByProjectAndAssigneeAsync(projectId, userId);
+            // 6. Retirer ses assignations aux Issues
+            var assignedIssues =
+                await _unitOfWork.Issues
+                    .GetByProjectAndAssigneeAsync(
+                        projectId,
+                        userId);
 
             foreach (var issue in assignedIssues)
             {
@@ -250,7 +243,8 @@ namespace BugTracker.Application.Services
             }
 
             // 7. Supprimer le membre
-            _unitOfWork.ProjectMembers.Delete(memberToRemove);
+            _unitOfWork.ProjectMembers.Delete(
+                memberToRemove);
 
             // 8. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
