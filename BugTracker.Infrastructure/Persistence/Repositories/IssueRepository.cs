@@ -120,8 +120,7 @@ namespace BugTracker.Infrastructure.Persistence.Repositories
             return await _dbSet
                 .Where(i =>
                     i.SprintId == sprintId &&
-                    (i.Status == IssueStatus.Todo ||
-                     i.Status == IssueStatus.InProgress))
+                    i.Status != IssueStatus.Done)
                 .ToListAsync();
         }
 
