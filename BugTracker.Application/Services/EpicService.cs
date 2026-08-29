@@ -11,12 +11,10 @@ namespace BugTracker.Application.Services
     public class EpicService : IEpicService
     {
         private readonly IUnitOfWork _unitOfWork;
-        private readonly ICurrentUserService _currentUserService;
 
-        public EpicService(ICurrentUserService currentUserService, IUnitOfWork unitOfWork)
+        public EpicService(IUnitOfWork unitOfWork)
         {
             _unitOfWork = unitOfWork;
-            _currentUserService = currentUserService;
         }
 
         public async Task<EpicDto?> GetByIdAsync(Guid epicId)
@@ -43,10 +41,12 @@ namespace BugTracker.Application.Services
 
         public async Task<IEnumerable<EpicDto>> GetAllByProjectAsync(Guid projectId)
         {
-            var project = await _unitOfWork.Projects.GetByIdAsync(projectId);
+            var project = await _unitOfWork.Projects
+                .GetByIdAsync(projectId);
 
             if (project == null)
-                throw new NotFoundException("Projet introuvable.");
+                throw new NotFoundException(
+                    "Projet introuvable.");
 
             var epics = await _unitOfWork.Epics
                 .GetByProjectIdAsync(projectId);
@@ -58,10 +58,12 @@ namespace BugTracker.Application.Services
 
         public async Task<IEnumerable<EpicDto>> GetActiveByProjectAsync(Guid projectId)
         {
-            var project = await _unitOfWork.Projects.GetByIdAsync(projectId);
+            var project = await _unitOfWork.Projects
+                .GetByIdAsync(projectId);
 
             if (project == null)
-                throw new NotFoundException("Projet introuvable.");
+                throw new NotFoundException(
+                    "Projet introuvable.");
 
             var epics = await _unitOfWork.Epics
                 .GetActiveEpicsAsync(projectId);
@@ -74,31 +76,15 @@ namespace BugTracker.Application.Services
         public async Task<EpicDto> CreateAsync(Guid projectId, CreateEpicDto dto)
         {
             // 1. Vérifier que le projet existe
-            var projectExists = await _unitOfWork.Projects.ExistsAsync(projectId);
+            var projectExists = await _unitOfWork.Projects
+                .ExistsAsync(projectId);
 
             if (!projectExists)
-                throw new NotFoundException("Projet non trouvé.");
+                throw new NotFoundException(
+                    "Projet non trouvé.");
 
-            // 2. Utilisateur connecté
-            var currentUserId = _currentUserService.UserId;
 
-            // 3. Vérifier les permissions
-            if (!_currentUserService.IsAdmin)
-            {
-                var currentMember = await _unitOfWork.ProjectMembers
-                    .GetByProjectAndUserAsync(
-                        projectId,
-                        currentUserId);
-
-                if (currentMember == null ||
-                    currentMember.Role != ProjectRole.Manager)
-                {
-                    throw new ForbiddenException(
-                        "Seuls le Manager et l'Admin peuvent créer un Epic.");
-                }
-            }
-
-            // 4. Créer l'Epic
+            // 2. Créer l'Epic
             var epic = new Epic
             {
                 ProjectId = projectId,
@@ -110,10 +96,10 @@ namespace BugTracker.Application.Services
 
             await _unitOfWork.Epics.AddAsync(epic);
 
-            // 5. Sauvegarder
+            // 3. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
 
-            // 6. Retourner le DTO
+            // 4. Retourner le DTO
             return epic.ToDto();
         }
 
@@ -124,33 +110,19 @@ namespace BugTracker.Application.Services
                 .GetByIdAsync(epicId);
 
             if (epic == null)
-                throw new NotFoundException("Epic non trouvé.");
+                throw new NotFoundException(
+                    "Epic non trouvé.");
 
+            // 2. Règle métier :
+            // un Epic archivé ne peut plus être modifié
             if (epic.Status == EpicStatus.Archived)
             {
                 throw new BusinessRuleException(
                     "Impossible de modifier un Epic archivé.");
             }
 
-            var currentUserId = _currentUserService.UserId;
 
-            // 2. Vérifier les permissions
-            if (!_currentUserService.IsAdmin)
-            {
-                var currentMember = await _unitOfWork.ProjectMembers
-                    .GetByProjectAndUserAsync(
-                        epic.ProjectId,
-                        currentUserId);
-
-                if (currentMember == null ||
-                    currentMember.Role != ProjectRole.Manager)
-                {
-                    throw new ForbiddenException(
-                        "Seuls le Manager et l'Admin peuvent modifier un Epic.");
-                }
-            }
-
-            // 3. Mettre à jour les propriétés
+            // 3. Modifier
             epic.Title = dto.Title.Trim();
             epic.Description = dto.Description?.Trim();
             epic.ColorCode = dto.ColorCode;
@@ -158,47 +130,29 @@ namespace BugTracker.Application.Services
             // 4. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
 
-            // 5. Retourner le DTO
             return epic.ToDto();
         }
 
         public async Task DeleteAsync(Guid epicId)
         {
-            // 1. Récupérer l'Epic avec ses Issues
+            // 1. Charger l'Epic avec ses Issues
             var epic = await _unitOfWork.Epics
                 .GetByIdWithDetailsAsync(epicId);
 
             if (epic == null)
-                throw new NotFoundException("Epic non trouvé.");
+                throw new NotFoundException(
+                    "Epic non trouvé.");
 
-            var currentUserId = _currentUserService.UserId;
-
-            // 2. Vérifier les permissions
-            if (!_currentUserService.IsAdmin)
-            {
-                var currentMember = await _unitOfWork.ProjectMembers
-                    .GetByProjectAndUserAsync(
-                        epic.ProjectId,
-                        currentUserId);
-
-                if (currentMember == null ||
-                    currentMember.Role != ProjectRole.Manager)
-                {
-                    throw new ForbiddenException(
-                        "Seuls le Manager et l'Admin peuvent supprimer un Epic.");
-                }
-            }
-
-            // 3. Détacher les Issues de l'Epic
+            // 2. Détacher les Issues
             foreach (var issue in epic.Issues)
             {
                 issue.EpicId = null;
             }
 
-            // 4. Supprimer l'Epic
+            // 3. Supprimer l'Epic
             _unitOfWork.Epics.Delete(epic);
 
-            // 5. Sauvegarder
+            // 4. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
         }
 
@@ -209,36 +163,21 @@ namespace BugTracker.Application.Services
                 .GetByIdAsync(epicId);
 
             if (epic == null)
-                throw new NotFoundException("Epic non trouvé.");
+                throw new NotFoundException(
+                    "Epic non trouvé.");
 
-            // 2. Vérifier la validité de l'enum
+            // 2. Vérifier la valeur de l'enum
             if (!Enum.IsDefined(typeof(EpicStatus), newStatus))
             {
-                throw new BusinessRuleException("Le statut fourni est invalide.");
+                throw new BusinessRuleException(
+                    "Le statut fourni est invalide.");
             }
 
-            var currentUserId = _currentUserService.UserId;
 
-            // 3. Vérifier les permissions
-            if (!_currentUserService.IsAdmin)
-            {
-                var currentMember = await _unitOfWork.ProjectMembers
-                    .GetByProjectAndUserAsync(
-                        epic.ProjectId,
-                        currentUserId);
-
-                if (currentMember == null ||
-                    currentMember.Role != ProjectRole.Manager)
-                {
-                    throw new ForbiddenException(
-                        "Seuls le Manager et l'Admin peuvent modifier le statut d'un Epic.");
-                }
-            }
-
-            // 4. Modifier le statut
+            // 3. Modifier le statut
             epic.Status = newStatus;
 
-            // 5. Sauvegarder
+            // 4. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
         }
     }

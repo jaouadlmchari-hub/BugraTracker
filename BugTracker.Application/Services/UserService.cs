@@ -62,7 +62,8 @@ namespace BugTracker.Application.Services
                 Username = dto.Username,
                 FullName = dto.FullName,
                 PasswordHash = hashedPassword,
-                AvatarUrl = dto.AvatarUrl
+                AvatarUrl = dto.AvatarUrl,
+                SystemRole = SystemRole.Developer
             };
 
             await _unitOfWork.Users.AddAsync(user);
@@ -213,6 +214,7 @@ namespace BugTracker.Application.Services
 
             user.FailedLoginAttempts = 0;
             user.LockoutUntil = null;
+            user.UpdatedAt = DateTime.UtcNow;
 
             await _unitOfWork.SaveChangesAsync();
         }
