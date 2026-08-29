@@ -22,6 +22,21 @@ namespace BugTracker.API
             builder.Services.AddJwtBearerAuthentication(builder.Configuration);
             builder.Services.AddAuthorizationPolicies();
 
+            builder.Services.AddCors(options =>
+            {
+                options.AddPolicy("FrontendCorsPolicy", policy =>
+                {
+                    var allowedOrigins = builder.Configuration
+                        .GetSection("Cors:AllowedOrigins")
+                        .Get<string[]>();
+
+                    policy
+                        .WithOrigins(allowedOrigins ?? Array.Empty<string>())
+                        .AllowAnyHeader()
+                        .AllowAnyMethod();
+                });
+            });
+
             builder.Services.AddHttpContextAccessor();
             builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 
@@ -71,6 +86,8 @@ namespace BugTracker.API
             }
 
             app.UseHttpsRedirection();
+
+            app.UseCors("FrontendCorsPolicy");
 
             app.UseAuthentication();
             app.UseAuthorization();
