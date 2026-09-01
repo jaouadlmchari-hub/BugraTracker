@@ -17,7 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\BugTracker.Application\BugTracker.Application.csproj" />
-    <ProjectReference Include="..\BugTracker.Infrastructure\BugTracker.Infrastructure.csproj" />
+	  <ProjectReference Include="..\BugTracker.Infrastructure\BugTracker.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>
