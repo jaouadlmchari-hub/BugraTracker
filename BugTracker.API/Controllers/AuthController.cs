@@ -16,18 +16,40 @@ namespace BugTracker.API.Controllers
             _authService = authService;
         }
 
-        [AllowAnonymous]
         [HttpPost("login")]
-        public async Task<ActionResult<AuthResponseDto>> Login(
-            LoginDto dto)
+        [AllowAnonymous]
+        [ProducesResponseType(typeof(AuthResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        public async Task<ActionResult<AuthResponseDto>> Login([FromBody] LoginDto dto)
         {
             var result = await _authService.LoginAsync(dto);
-
             return Ok(result);
         }
 
 
+        [HttpPost("refresh")]
+        [AllowAnonymous]
+        [ProducesResponseType(typeof(AuthResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        public async Task<ActionResult<AuthResponseDto>> Refresh([FromBody] RefreshTokenDto dto)
+        {
+            var result = await _authService.RefreshAsync(dto);
+            return Ok(result);
+        }
 
-      
+
+        [HttpPost("logout")]
+        [Authorize]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        public async Task<IActionResult> Logout([FromBody] RefreshTokenDto dto)
+        {
+            await _authService.LogoutAsync(dto);
+            return NoContent();
+        }
+
+
+
+
     }
 }

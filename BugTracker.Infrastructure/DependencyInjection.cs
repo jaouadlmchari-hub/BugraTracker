@@ -1,4 +1,5 @@
-﻿using BugTracker.Application.Interfaces.Persistence;
+﻿using BugTracker.Application.Configuration;
+using BugTracker.Application.Interfaces.Persistence;
 using BugTracker.Application.Interfaces.Repositories;
 using BugTracker.Application.Interfaces.Services;
 using BugTracker.Infrastructure.Extensions;
@@ -49,6 +50,11 @@ public static class DependencyInjection
 
         // JWT / RefrechToken
         services.AddAuthenticationServices(configuration);
+
+        // Authentication
+        services.Configure<AuthenticationSettings>(
+               configuration.GetSection("Authentication"));
+
 
         // Seeder
         services.AddScoped<DatabaseSeeder>();
