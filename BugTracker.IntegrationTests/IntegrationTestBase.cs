@@ -1,8 +1,9 @@
 ﻿using BugTracker.Application.DTOs.Auth;
+using BugTracker.Application.Interfaces.Services;
 using BugTracker.Domain.Entities;
+using BugTracker.Domain.Enums;
 using BugTracker.Infrastructure.Persistence;
 using Microsoft.Extensions.DependencyInjection;
-using BugTracker.Application.Interfaces.Services;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Xunit;
@@ -42,9 +43,13 @@ namespace BugTracker.IntegrationTests
             await action(dbContext);
         }
 
-        protected async Task<AuthResponseDto> AuthenticateAsync()
+        protected Task<AuthResponseDto> AuthenticateAsync()
         {
-            const string email = "authenticated@test.com";
+            return AuthenticateAsync("authenticated@test.com", "authenticated-user");
+        }
+
+        protected async Task<AuthResponseDto> AuthenticateAsync(string email, string username, SystemRole systemRole = SystemRole.Developer)
+        {
             const string password = "Password123!";
 
             string passwordHash;
@@ -60,9 +65,10 @@ namespace BugTracker.IntegrationTests
                 var user = new User
                 {
                     Email = email,
-                    Username = "authenticated-user",
+                    Username = username,
                     PasswordHash = passwordHash,
-                    IsActive = true
+                    IsActive = true,
+                    SystemRole = systemRole
                 };
 
                 dbContext.Set<User>().Add(user);
