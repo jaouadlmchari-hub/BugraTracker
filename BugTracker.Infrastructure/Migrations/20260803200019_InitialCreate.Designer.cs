@@ -279,7 +279,7 @@ namespace BugTracker.Infrastructure.Migrations
 
                     b.ToTable("issues", null, t =>
                         {
-                            t.HasCheckConstraint("CK_Issues_StoryPoints", "[story_points] IS NULL OR [story_points] > 0");
+                            t.HasCheckConstraint("CK_Issues_StoryPoints", "[story_points] IS NULL OR [story_points] >= 0");
                         });
                 });
 

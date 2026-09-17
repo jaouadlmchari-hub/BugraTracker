@@ -65,13 +65,13 @@ public class IssueConfiguration : IEntityTypeConfiguration<Issue>
                .IsRequired();
 
 
-        builder.ToTable(t => t.HasCheckConstraint("CK_Issues_StoryPoints", "[story_points] IS NULL OR [story_points] > 0"));
+        builder.ToTable(t => t.HasCheckConstraint("CK_Issues_StoryPoints", "[story_points] IS NULL OR [story_points] >= 0"));
         builder.HasOne(i => i.Project)
                .WithMany(p => p.Issues)
                .HasForeignKey(i => i.ProjectId)
                .OnDelete(DeleteBehavior.Cascade);
 
-        
+
         builder.HasOne(i => i.Sprint)
                .WithMany(s => s.Issues)
                .HasForeignKey(i => i.SprintId)

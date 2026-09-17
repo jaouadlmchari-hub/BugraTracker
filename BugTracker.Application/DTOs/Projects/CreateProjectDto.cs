@@ -9,7 +9,7 @@ public class CreateProjectDto
     public string Name { get; set; } = string.Empty;
 
     [Required(ErrorMessage = "La clé du projet est obligatoire.")]
-    [StringLength(10, MinimumLength = 2,ErrorMessage = "La clé doit contenir entre 2 et 10 caractères.")]
+    [StringLength(6, MinimumLength = 2,ErrorMessage = "La clé doit contenir entre 2 et 6 caractères.")]
     public string Key { get; set; } = string.Empty;
 
     [StringLength(500, ErrorMessage = "La description ne peut pas dépasser 500 caractères.")]

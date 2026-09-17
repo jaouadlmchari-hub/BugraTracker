@@ -180,8 +180,8 @@ namespace BugTracker.Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_issues", x => x.Id);
-                    table.CheckConstraint("CK_Issues_StoryPoints", "[story_points] IS NULL OR [story_points] > 0");
-                    table.ForeignKey(
+                    table.CheckConstraint("CK_Issues_StoryPoints", "[story_points] IS NULL OR [story_points] >= 0");
+                    table.ForeignKey (
                         name: "FK_issues_epics_EpicId",
                         column: x => x.EpicId,
                         principalTable: "epics",
