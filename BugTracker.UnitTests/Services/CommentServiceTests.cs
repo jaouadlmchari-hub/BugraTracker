@@ -49,7 +49,7 @@ public class CommentServiceTests
         };
 
         _commentRepositoryMock
-            .Setup(r => r.GetByIdAsync(commentId))
+            .Setup(r => r.GetByIdWithDetailsAsync(commentId))
             .ReturnsAsync(comment);
 
         // Act
@@ -60,9 +60,10 @@ public class CommentServiceTests
         result!.Id.Should().Be(commentId);
         result.IssueId.Should().Be(issueId);
         result.AuthorId.Should().Be(authorId);
-        result.Content.Should().Be("This bug happens after login");
+       
+        result.Content.Should().Be("This bug happens after login.");
 
-        _commentRepositoryMock.Verify(r => r.GetByIdAsync(commentId), Times.Once);
+        _commentRepositoryMock.Verify(r => r.GetByIdWithDetailsAsync(commentId), Times.Once);
     }
 
     [Fact]
@@ -72,16 +73,17 @@ public class CommentServiceTests
         var commentId = Guid.NewGuid();
 
         _commentRepositoryMock
-            .Setup(r => r.GetByIdAsync(commentId))
+            .Setup(r => r.GetByIdWithDetailsAsync(commentId))
             .ReturnsAsync((Comment?)null);
 
         // Act
+
         var result = await _sut.GetByIdAsync(commentId);
 
         // Assert
         result.Should().BeNull();
 
-        _commentRepositoryMock.Verify(r => r.GetByIdAsync(commentId), Times.Once);
+        _commentRepositoryMock.Verify(r => r.GetByIdWithDetailsAsync(commentId), Times.Once);
     }
 
     [Fact]
