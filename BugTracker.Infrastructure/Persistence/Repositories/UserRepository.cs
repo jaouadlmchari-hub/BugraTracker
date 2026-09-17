@@ -31,6 +31,13 @@ public class UserRepository : Repository<User>, IUserRepository
                      (!excludeUserId.HasValue || u.Id != excludeUserId.Value));
     }
 
+    public async Task<bool> IsUsernameUniqueAsync(string username, Guid? excludeUserId = null)
+    {
+        return !await _dbSet
+                     .AnyAsync(u => u.Username == username &&
+                     (!excludeUserId.HasValue || u.Id != excludeUserId.Value));
+    }
+
     public async Task<IEnumerable<User>> GetActiveUsersAsync()
     {
         return await _dbSet

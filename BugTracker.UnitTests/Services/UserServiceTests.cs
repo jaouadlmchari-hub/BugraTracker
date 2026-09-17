@@ -44,17 +44,47 @@ namespace BugTracker.UnitTests.Services
                 Password = "Password123!"
             };
 
-            var existingUser = new User
+            _userRepositoryMock
+                .Setup(r => r.IsEmailUniqueAsync(dto.Email, null))
+                .ReturnsAsync(false);
+
+            // Act
+            Func<Task> act = () => _sut.CreateAsync(dto);
+
+            // Assert
+            await act.Should().ThrowAsync<ConflictException>();
+
+            _passwordHasherMock.Verify(
+                h => h.Hash(It.IsAny<string>()),
+                Times.Never);
+
+            _userRepositoryMock.Verify(
+                r => r.AddAsync(It.IsAny<User>()),
+                Times.Never);
+
+            _unitOfWorkMock.Verify(
+                u => u.SaveChangesAsync(),
+                Times.Never);
+        }
+
+        [Fact]
+        public async Task CreateAsync_WhenUsernameAlreadyExists_ShouldThrowConflictException()
+        {
+            // Arrange
+            var dto = new CreateUserDto
             {
-                Id = Guid.NewGuid(),
-                Username = "existing",
-                Email = dto.Email,
-                IsActive = true
+                Username = "jaouad",
+                Email = "jaouad@test.com",
+                Password = "Password123!"
             };
 
             _userRepositoryMock
-                .Setup(r => r.GetByEmailAsync(dto.Email))
-                .ReturnsAsync(existingUser);
+                .Setup(r => r.IsEmailUniqueAsync(dto.Email, null))
+                .ReturnsAsync(true);
+
+            _userRepositoryMock
+                .Setup(r => r.IsUsernameUniqueAsync(dto.Username, null))
+                .ReturnsAsync(false);
 
             // Act
             Func<Task> act = () => _sut.CreateAsync(dto);
@@ -89,8 +119,12 @@ namespace BugTracker.UnitTests.Services
             const string passwordHash = "hashed-password";
 
             _userRepositoryMock
-                .Setup(r => r.GetByEmailAsync(dto.Email))
-                .ReturnsAsync((User?)null);
+                .Setup(r => r.IsEmailUniqueAsync(dto.Email, null))
+                .ReturnsAsync(true);
+
+            _userRepositoryMock
+                .Setup(r => r.IsUsernameUniqueAsync(dto.Username, null))
+                .ReturnsAsync(true);
 
             _passwordHasherMock
                 .Setup(h => h.Hash(dto.Password))
@@ -136,17 +170,42 @@ namespace BugTracker.UnitTests.Services
                 SystemRole = SystemRole.Admin
             };
 
-            var existingUser = new User
+            _userRepositoryMock
+                .Setup(r => r.IsEmailUniqueAsync(dto.Email, null))
+                .ReturnsAsync(false);
+
+            // Act
+            Func<Task> act = () => _sut.AdminCreateAsync(dto);
+
+            // Assert
+            await act.Should().ThrowAsync<ConflictException>();
+
+            _passwordHasherMock.Verify(h => h.Hash(It.IsAny<string>()), Times.Never);
+
+            _userRepositoryMock.Verify(r => r.AddAsync(It.IsAny<User>()), Times.Never);
+
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
+        }
+
+        [Fact]
+        public async Task AdminCreateAsync_WhenUsernameAlreadyExists_ShouldThrowConflictException()
+        {
+            // Arrange
+            var dto = new AdminCreateUserDto
             {
-                Id = Guid.NewGuid(),
-                Username = "existing",
-                Email = dto.Email,
-                IsActive = true
+                Username = "admin2",
+                Email = "admin@test.com",
+                Password = "Password123!",
+                SystemRole = SystemRole.Admin
             };
 
             _userRepositoryMock
-                .Setup(r => r.GetByEmailAsync(dto.Email))
-                .ReturnsAsync(existingUser);
+                .Setup(r => r.IsEmailUniqueAsync(dto.Email, null))
+                .ReturnsAsync(true);
+
+            _userRepositoryMock
+                .Setup(r => r.IsUsernameUniqueAsync(dto.Username, null))
+                .ReturnsAsync(false);
 
             // Act
             Func<Task> act = () => _sut.AdminCreateAsync(dto);
@@ -176,8 +235,12 @@ namespace BugTracker.UnitTests.Services
             const string passwordHash = "hashed-password";
 
             _userRepositoryMock
-                .Setup(r => r.GetByEmailAsync(dto.Email))
-                .ReturnsAsync((User?)null);
+                .Setup(r => r.IsEmailUniqueAsync(dto.Email, null))
+                .ReturnsAsync(true);
+
+            _userRepositoryMock
+                .Setup(r => r.IsUsernameUniqueAsync(dto.Username, null))
+                .ReturnsAsync(true);
 
             _passwordHasherMock
                 .Setup(h => h.Hash(dto.Password))
@@ -257,12 +320,41 @@ namespace BugTracker.UnitTests.Services
                 Email = "existing@test.com"
             };
 
-            var userWithSameEmail = new User
+            _userRepositoryMock
+                .Setup(r => r.GetByIdAsync(userId))
+                .ReturnsAsync(user);
+
+            _userRepositoryMock
+                .Setup(r => r.IsEmailUniqueAsync(dto.Email, userId))
+                .ReturnsAsync(false);
+
+            // Act
+            Func<Task> act = () => _sut.UpdateAsync(userId, dto);
+
+            user.Username.Should().Be("jaouad");
+            user.Email.Should().Be("old@test.com");
+
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
+        }
+
+        [Fact]
+        public async Task UpdateAsync_WhenUsernameIsUsedByAnotherUser_ShouldThrowConflictException()
+        {
+            // Arrange
+            var userId = Guid.NewGuid();
+
+            var user = new User
             {
-                Id = anotherUserId,
-                Username = "anotheruser",
-                Email = dto.Email,
+                Id = userId,
+                Username = "jaouad",
+                Email = "old@test.com",
                 IsActive = true
+            };
+
+            var dto = new UpdateUserDto
+            {
+                Username = "existing-username",
+                Email = "updated@test.com"
             };
 
             _userRepositoryMock
@@ -270,8 +362,12 @@ namespace BugTracker.UnitTests.Services
                 .ReturnsAsync(user);
 
             _userRepositoryMock
-                .Setup(r => r.GetByEmailAsync(dto.Email))
-                .ReturnsAsync(userWithSameEmail);
+                .Setup(r => r.IsEmailUniqueAsync(dto.Email, userId))
+                .ReturnsAsync(true);
+
+            _userRepositoryMock
+                .Setup(r => r.IsUsernameUniqueAsync(dto.Username, userId))
+                .ReturnsAsync(false);
 
             // Act
             Func<Task> act = () => _sut.UpdateAsync(userId, dto);
@@ -310,8 +406,12 @@ namespace BugTracker.UnitTests.Services
                 .ReturnsAsync(user);
 
             _userRepositoryMock
-                .Setup(r => r.GetByEmailAsync(dto.Email))
-                .ReturnsAsync((User?)null);
+                .Setup(r => r.IsEmailUniqueAsync(dto.Email, userId))
+                .ReturnsAsync(true);
+
+            _userRepositoryMock
+                .Setup(r => r.IsUsernameUniqueAsync(dto.Username, userId))
+                .ReturnsAsync(true);
 
             var beforeUpdate = DateTime.UtcNow;
 

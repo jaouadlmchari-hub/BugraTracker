@@ -16,6 +16,8 @@ namespace BugTracker.Application.Interfaces.Repositories
 
         Task<bool> IsEmailUniqueAsync(string email, Guid? excludeUserId = null);
 
+        Task<bool> IsUsernameUniqueAsync(string username, Guid? excludeUserId = null);
+
         Task<IEnumerable<User>> GetActiveUsersAsync();
 
         Task<(IEnumerable<User> Items, int TotalCount)> GetPaginatedAsync(UserFilterDto filter);

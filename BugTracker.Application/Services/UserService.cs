@@ -49,10 +49,15 @@ namespace BugTracker.Application.Services
 
         public async Task<UserDto> CreateAsync(CreateUserDto dto)
         {
-            var isUnique = await _unitOfWork.Users.IsEmailUniqueAsync(dto.Email);
+            var isEmailUnique = await _unitOfWork.Users.IsEmailUniqueAsync(dto.Email);
 
-            if (!isUnique)
+            if (!isEmailUnique)
                 throw new ConflictException("Email is already in use.");
+
+            var isUsernameUnique = await _unitOfWork.Users.IsUsernameUniqueAsync(dto.Username);
+
+            if (!isUsernameUnique)
+                throw new ConflictException("Username is already in use.");
 
             var hashedPassword = _passwordHasher.Hash(dto.Password);
 
@@ -79,10 +84,15 @@ namespace BugTracker.Application.Services
             if (user == null)
                 throw new NotFoundException("User not found.");
 
-            var isUnique = await _unitOfWork.Users.IsEmailUniqueAsync(dto.Email, userId);
+            var isEmailUnique = await _unitOfWork.Users.IsEmailUniqueAsync(dto.Email, userId);
 
-            if (!isUnique)
+            if (!isEmailUnique)
                 throw new ConflictException("Email is already in use.");
+
+            var isUsernameUnique = await _unitOfWork.Users.IsUsernameUniqueAsync(dto.Username, userId);
+
+            if (!isUsernameUnique)
+                throw new ConflictException("Username is already in use.");
 
             user.Email = dto.Email;
             user.Username = dto.Username;
@@ -123,10 +133,15 @@ namespace BugTracker.Application.Services
 
         public async Task<UserDto> AdminCreateAsync(AdminCreateUserDto dto)
         {
-            var isUnique = await _unitOfWork.Users.IsEmailUniqueAsync(dto.Email);
+            var isEmailUnique = await _unitOfWork.Users.IsEmailUniqueAsync(dto.Email);
 
-            if (!isUnique)
+            if (!isEmailUnique)
                 throw new ConflictException("Email is already in use.");
+
+            var isUsernameUnique = await _unitOfWork.Users.IsUsernameUniqueAsync(dto.Username);
+
+            if (!isUsernameUnique)
+                throw new ConflictException("Username is already in use.");
 
             var hashedPassword = _passwordHasher.Hash(dto.Password);
 
