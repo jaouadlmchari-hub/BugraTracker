@@ -29,6 +29,8 @@ namespace BugTracker.IntegrationTests
 
             var dbContext = scope.ServiceProvider.GetRequiredService<BugTrackerDbContext>();
 
+            // Ensure database is recreated for tests so migrations with updated constraints are applied
+            dbContext.Database.EnsureDeleted();
             dbContext.Database.Migrate();
 
             _connectionString = dbContext.Database.GetConnectionString()!;
