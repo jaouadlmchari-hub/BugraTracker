@@ -100,6 +100,10 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
 
             const int totalCount = 25;
 
+            ProjectRepositoryMock
+                .Setup(r => r.ExistsAsync(projectId))
+                .ReturnsAsync(true);
+
             IssueRepositoryMock
                 .Setup(r => r.GetPaginatedAsync(projectId, filter))
                 .ReturnsAsync((issues, totalCount));

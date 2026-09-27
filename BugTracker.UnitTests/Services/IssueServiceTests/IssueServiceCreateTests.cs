@@ -303,6 +303,18 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
                 Role = ProjectRole.Developer
             };
 
+            var reporter = new User
+            {
+                Id = reporterId,
+                Username = "reporter"
+            };
+
+            var assignee = new User
+            {
+                Id = assigneeId,
+                Username = "assignee"
+            };
+
             var dto = new CreateIssueDto
             {
                 Title = "Login bug",
@@ -329,6 +341,28 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
             IssueRepositoryMock
                 .Setup(r => r.AddAsync(It.IsAny<Issue>()))
                 .Callback<Issue>(issue => createdIssue = issue)
+                .Returns(Task.CompletedTask);
+
+            IssueRepositoryMock
+                .Setup(r => r.GetByIdWithDetailsAsync(It.IsAny<Guid>()))
+                .ReturnsAsync((Guid id) =>
+                {
+                    if (createdIssue?.Id == id)
+                    {
+                        // Populate navigation properties
+                        createdIssue.Reporter = reporter;
+                        createdIssue.Assignee = assignee;
+                        return createdIssue;
+                    }
+                    return null;
+                });
+
+            UnitOfWorkMock
+                .Setup(u => u.SaveChangesAsync())
+                .ReturnsAsync(0);
+
+            ActivityLogServiceMock
+                .Setup(a => a.LogAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<ActivityAction>(), null, null, null))
                 .Returns(Task.CompletedTask);
 
             // Act
