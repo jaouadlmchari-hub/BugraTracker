@@ -16,7 +16,7 @@ public static class IssueMappingExtensions
             SprintId = issue.SprintId,
 
             ReporterId = issue.ReporterId,
-            ReporterName = issue.Reporter.Username,
+            ReporterName = issue.Reporter != null ? issue.Reporter.Username : null,
 
             AssigneeId = issue.AssigneeId,
             AssigneeName = issue.Assignee != null? issue.Assignee.Username: null,

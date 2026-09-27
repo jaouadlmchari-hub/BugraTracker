@@ -5,86 +5,145 @@ using BugTracker.Application.Interfaces.Services;
 using BugTracker.Application.Mappings;
 using BugTracker.Domain.Entities;
 using BugTracker.Domain.Enums;
+using Microsoft.Extensions.Logging;
 
 namespace BugTracker.Application.Services
 {
     public class ProjectMemberService : IProjectMemberService
     {
         private readonly IUnitOfWork _unitOfWork;
+        private readonly ILogger<ProjectMemberService> _logger;
 
-        public ProjectMemberService(IUnitOfWork unitOfWork)
+        public ProjectMemberService(
+            IUnitOfWork unitOfWork,
+            ILogger<ProjectMemberService> logger)
         {
             _unitOfWork = unitOfWork;
+            _logger = logger;
         }
 
-        public async Task<IEnumerable<ProjectMemberDto>> GetMembersAsync(Guid projectId)
+        public async Task<IEnumerable<ProjectMemberDto>> GetMembersAsync( Guid projectId)
         {
+            _logger.LogDebug(
+                "Retrieving members for project {ProjectId}.",
+                projectId);
+
             var project = await _unitOfWork.Projects
                 .GetByIdAsync(projectId);
 
             if (project == null)
-                throw new NotFoundException(
-                    "Projet non trouvé.");
+            {
+                _logger.LogWarning(
+                    "Cannot retrieve members. Project {ProjectId} was not found.",
+                    projectId);
 
+                throw new NotFoundException("Projet non trouvé.");
+            }
 
             var members = await _unitOfWork.ProjectMembers
                 .GetByProjectIdAsync(projectId);
+
+            _logger.LogDebug(
+                "Retrieved {MemberCount} members for project {ProjectId}.",
+                members.Count(),
+                projectId);
 
             return members
                 .Select(m => m.ToDto())
                 .ToList();
         }
 
-        public async Task<ProjectMemberDto?> GetMemberAsync(Guid projectId, Guid userId)
+        public async Task<ProjectMemberDto?> GetMemberAsync( Guid projectId, Guid userId)
         {
+            _logger.LogDebug(
+                "Retrieving member {UserId} from project {ProjectId}.",
+                userId,
+                projectId);
+
             var member = await _unitOfWork.ProjectMembers
                 .GetByProjectAndUserAsync(projectId, userId);
+
+            if (member == null)
+            {
+                _logger.LogDebug(
+                    "User {UserId} is not a member of project {ProjectId}.",
+                    userId,
+                    projectId);
+            }
 
             return member?.ToDto();
         }
 
-        public async Task<bool> ShareAnyProjectAsync(Guid firstUserId,  Guid secondUserId)
+        public async Task<bool> ShareAnyProjectAsync(
+            Guid firstUserId,
+            Guid secondUserId)
         {
+            _logger.LogDebug(
+                "Checking whether users {FirstUserId} and {SecondUserId} share a project.",
+                firstUserId,
+                secondUserId);
+
             return await _unitOfWork.ProjectMembers
                 .ShareAnyProjectAsync(
                     firstUserId,
                     secondUserId);
         }
 
-        public async Task<ProjectMemberDto> AddMemberAsync(Guid projectId, AddProjectMemberDto dto)
+        public async Task<ProjectMemberDto> AddMemberAsync(
+            Guid projectId,
+            AddProjectMemberDto dto)
         {
-            // 1. Vérifier que le projet existe
+            _logger.LogInformation(
+                "Adding user {UserId} to project {ProjectId} with role {Role}.",
+                dto.UserId,
+                projectId,
+                dto.Role);
+
             var project = await _unitOfWork.Projects
                 .GetByIdAsync(projectId);
 
             if (project == null)
-                throw new NotFoundException(
-                    "Projet non trouvé.");
+            {
+                _logger.LogWarning(
+                    "Add member failed. Project {ProjectId} was not found.",
+                    projectId);
 
+                throw new NotFoundException("Projet non trouvé.");
+            }
 
-            // 2. Projet archivé
             if (project.Status == ProjectStatus.Archived)
             {
+                _logger.LogWarning(
+                    "Add member rejected. Project {ProjectId} is archived.",
+                    projectId);
+
                 throw new BusinessRuleException(
                     "Un projet archivé ne peut plus recevoir de nouveaux membres.");
             }
 
-            // 3. Vérifier que l'utilisateur existe
             var user = await _unitOfWork.Users
                 .GetByIdAsync(dto.UserId);
 
             if (user == null)
+            {
+                _logger.LogWarning(
+                    "Add member failed. User {UserId} was not found.",
+                    dto.UserId);
+
                 throw new NotFoundException(
                     "Utilisateur non trouvé.");
+            }
 
-            // 4. L'utilisateur doit être actif
             if (!user.IsActive)
             {
+                _logger.LogWarning(
+                    "Add member rejected. User {UserId} is inactive.",
+                    dto.UserId);
+
                 throw new BusinessRuleException(
                     "Impossible d'ajouter un utilisateur désactivé.");
             }
 
-            // 5. Ne pas ajouter deux fois le même membre
             var existingMember =
                 await _unitOfWork.ProjectMembers
                     .GetByProjectAndUserAsync(
@@ -93,11 +152,15 @@ namespace BugTracker.Application.Services
 
             if (existingMember != null)
             {
+                _logger.LogWarning(
+                    "Add member rejected. User {UserId} is already a member of project {ProjectId}.",
+                    dto.UserId,
+                    projectId);
+
                 throw new BusinessRuleException(
                     "Cet utilisateur est déjà membre de ce projet.");
             }
 
-            // 6. Créer le membre
             var projectMember = new ProjectMember
             {
                 ProjectId = projectId,
@@ -108,34 +171,53 @@ namespace BugTracker.Application.Services
             await _unitOfWork.ProjectMembers
                 .AddAsync(projectMember);
 
-            // 7. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
 
-            // Nécessaire au mapping Username / FullName
             projectMember.User = user;
+
+            _logger.LogInformation(
+                "User {UserId} successfully added to project {ProjectId} with role {Role}.",
+                dto.UserId,
+                projectId,
+                dto.Role);
 
             return projectMember.ToDto();
         }
 
-        public async Task ChangeRoleAsync(Guid projectId, Guid userId, ProjectRole newRole)
+        public async Task ChangeRoleAsync(
+            Guid projectId,
+            Guid userId,
+            ProjectRole newRole)
         {
-            // 1. Vérifier le projet
+            _logger.LogInformation(
+                "Changing role of user {UserId} in project {ProjectId} to {NewRole}.",
+                userId,
+                projectId,
+                newRole);
+
             var project = await _unitOfWork.Projects
                 .GetByIdAsync(projectId);
 
             if (project == null)
+            {
+                _logger.LogWarning(
+                    "Change role failed. Project {ProjectId} was not found.",
+                    projectId);
+
                 throw new NotFoundException(
                     "Projet non trouvé.");
+            }
 
-            // 2. Projet archivé
             if (project.Status == ProjectStatus.Archived)
             {
+                _logger.LogWarning(
+                    "Change role rejected. Project {ProjectId} is archived.",
+                    projectId);
+
                 throw new BusinessRuleException(
                     "Un projet archivé ne peut plus être modifié.");
             }
 
-
-            // 3. Récupérer le membre cible
             var memberToUpdate =
                 await _unitOfWork.ProjectMembers
                     .GetByProjectAndUserAsync(
@@ -144,18 +226,27 @@ namespace BugTracker.Application.Services
 
             if (memberToUpdate == null)
             {
+                _logger.LogWarning(
+                    "Change role failed. User {UserId} is not a member of project {ProjectId}.",
+                    userId,
+                    projectId);
+
                 throw new NotFoundException(
                     "Cet utilisateur n'est pas membre de ce projet.");
             }
 
-            // 4. Même rôle
             if (memberToUpdate.Role == newRole)
             {
+                _logger.LogWarning(
+                    "Change role rejected. User {UserId} already has role {Role} in project {ProjectId}.",
+                    userId,
+                    newRole,
+                    projectId);
+
                 throw new BusinessRuleException(
                     "L'utilisateur possède déjà ce rôle.");
             }
 
-            // 5. Le projet doit toujours avoir au moins un Manager
             if (memberToUpdate.Role == ProjectRole.Manager &&
                 newRole != ProjectRole.Manager)
             {
@@ -165,37 +256,63 @@ namespace BugTracker.Application.Services
 
                 if (managerCount <= 1)
                 {
+                    _logger.LogWarning(
+                        "Change role rejected. User {UserId} is the last Manager of project {ProjectId}.",
+                        userId,
+                        projectId);
+
                     throw new BusinessRuleException(
                         "Impossible de modifier le rôle. " +
                         "Le projet doit conserver au moins un Manager.");
                 }
             }
 
-            // 6. Modifier
+            var oldRole = memberToUpdate.Role;
+
             memberToUpdate.Role = newRole;
 
             await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Role of user {UserId} in project {ProjectId} changed from {OldRole} to {NewRole}.",
+                userId,
+                projectId,
+                oldRole,
+                newRole);
         }
 
-        public async Task RemoveMemberAsync(Guid projectId, Guid userId)
+        public async Task RemoveMemberAsync(
+            Guid projectId,
+            Guid userId)
         {
-            // 1. Vérifier le projet
+            _logger.LogInformation(
+                "Removing user {UserId} from project {ProjectId}.",
+                userId,
+                projectId);
+
             var project = await _unitOfWork.Projects
                 .GetByIdAsync(projectId);
 
             if (project == null)
+            {
+                _logger.LogWarning(
+                    "Remove member failed. Project {ProjectId} was not found.",
+                    projectId);
+
                 throw new NotFoundException(
                     "Projet non trouvé.");
+            }
 
-            // 2. Projet archivé
             if (project.Status == ProjectStatus.Archived)
             {
+                _logger.LogWarning(
+                    "Remove member rejected. Project {ProjectId} is archived.",
+                    projectId);
+
                 throw new BusinessRuleException(
                     "Un projet archivé ne peut plus être modifié.");
             }
 
-
-            // 3. Récupérer le membre cible
             var memberToRemove =
                 await _unitOfWork.ProjectMembers
                     .GetByProjectAndUserAsync(
@@ -204,19 +321,27 @@ namespace BugTracker.Application.Services
 
             if (memberToRemove == null)
             {
+                _logger.LogWarning(
+                    "Remove member failed. User {UserId} is not a member of project {ProjectId}.",
+                    userId,
+                    projectId);
+
                 throw new NotFoundException(
                     "Cet utilisateur n'est pas membre de ce projet.");
             }
 
-            // 4. Le Owner ne peut pas être retiré directement
             if (project.OwnerId == userId)
             {
+                _logger.LogWarning(
+                    "Remove member rejected. User {UserId} is the owner of project {ProjectId}.",
+                    userId,
+                    projectId);
+
                 throw new BusinessRuleException(
                     "Impossible de retirer le propriétaire du projet. " +
                     "Transférez d'abord la propriété du projet.");
             }
 
-            // 5. Toujours conserver au moins un Manager
             if (memberToRemove.Role == ProjectRole.Manager)
             {
                 var managerCount =
@@ -225,38 +350,53 @@ namespace BugTracker.Application.Services
 
                 if (managerCount <= 1)
                 {
+                    _logger.LogWarning(
+                        "Remove member rejected. User {UserId} is the last Manager of project {ProjectId}.",
+                        userId,
+                        projectId);
+
                     throw new BusinessRuleException(
                         "Impossible de retirer le dernier Manager du projet.");
                 }
             }
 
-            // 6. Retirer ses assignations aux Issues
             var assignedIssues =
                 await _unitOfWork.Issues
                     .GetByProjectAndAssigneeAsync(
                         projectId,
                         userId);
 
+            var unassignedIssueCount = assignedIssues.Count();
+
             foreach (var issue in assignedIssues)
             {
                 issue.AssigneeId = null;
             }
 
-            // 7. Supprimer le membre
             _unitOfWork.ProjectMembers.Delete(
                 memberToRemove);
 
-            // 8. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "User {UserId} successfully removed from project {ProjectId}. " +
+                "{IssueCount} issue assignments were cleared.",
+                userId,
+                projectId,
+                unassignedIssueCount);
         }
 
-        public async Task<bool> IsMemberAsync(Guid projectId, Guid userId)
+        public async Task<bool> IsMemberAsync(
+            Guid projectId,
+            Guid userId)
         {
             return await _unitOfWork.ProjectMembers
                 .IsMemberAsync(projectId, userId);
         }
 
-        public async Task<bool> IsManagerAsync(Guid projectId, Guid userId)
+        public async Task<bool> IsManagerAsync(
+            Guid projectId,
+            Guid userId)
         {
             return await _unitOfWork.ProjectMembers
                 .IsManagerAsync(projectId, userId);

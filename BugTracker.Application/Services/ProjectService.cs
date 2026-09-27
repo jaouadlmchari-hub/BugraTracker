@@ -7,6 +7,7 @@ using BugTracker.Application.Interfaces.Services;
 using BugTracker.Application.Mappings;
 using BugTracker.Domain.Entities;
 using BugTracker.Domain.Enums;
+using Microsoft.Extensions.Logging;
 
 namespace BugTracker.Application.Services
 {
@@ -14,19 +15,34 @@ namespace BugTracker.Application.Services
     {
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUserService;
+        private readonly ILogger<ProjectService> _logger;
 
-        public ProjectService(IUnitOfWork unitOfWork, ICurrentUserService currentUserService)
+        public ProjectService(
+            IUnitOfWork unitOfWork,
+            ICurrentUserService currentUserService,
+            ILogger<ProjectService> logger)
         {
             _unitOfWork = unitOfWork;
             _currentUserService = currentUserService;
+            _logger = logger;
         }
 
         public async Task<ProjectDto?> GetByIdAsync(Guid projectId)
         {
+            _logger.LogDebug(
+                "Retrieving project {ProjectId}.",
+                projectId);
+
             var project = await _unitOfWork.Projects.GetByIdAsync(projectId);
 
             if (project == null)
+            {
+                _logger.LogWarning(
+                    "Project {ProjectId} was not found.",
+                    projectId);
+
                 return null;
+            }
 
             return project.ToDto();
         }
@@ -35,10 +51,20 @@ namespace BugTracker.Application.Services
         {
             key = key.Trim().ToUpperInvariant();
 
+            _logger.LogDebug(
+                "Retrieving project with key {ProjectKey}.",
+                key);
+
             var project = await _unitOfWork.Projects.GetByKeyAsync(key);
 
             if (project == null)
+            {
+                _logger.LogWarning(
+                    "Project with key {ProjectKey} was not found.",
+                    key);
+
                 return null;
+            }
 
             return project.ToDto();
         }
@@ -48,10 +74,23 @@ namespace BugTracker.Application.Services
             var userId = _currentUserService.UserId;
             var isAdmin = _currentUserService.IsAdmin;
 
-            var (projects, totalCount) = await _unitOfWork.Projects.GetPaginatedAsync(
-                filter,
+            _logger.LogDebug(
+                "Retrieving projects. UserId: {UserId}, IsAdmin: {IsAdmin}, Page: {PageNumber}, PageSize: {PageSize}.",
                 userId,
-                isAdmin);
+                isAdmin,
+                filter.PageNumber,
+                filter.PageSize);
+
+            var (projects, totalCount) =
+                await _unitOfWork.Projects.GetPaginatedAsync(
+                    filter,
+                    userId,
+                    isAdmin);
+
+            _logger.LogDebug(
+                "Retrieved {ProjectCount} projects out of {TotalCount}.",
+                projects.Count(),
+                totalCount);
 
             return new PagedResultDto<ProjectDto>
             {
@@ -64,14 +103,26 @@ namespace BugTracker.Application.Services
 
         public async Task<ProjectDto> CreateAsync(CreateProjectDto dto)
         {
-           
-            // le créateur devient Owner du projet.
             var ownerId = _currentUserService.UserId;
 
-            var existingProject = await _unitOfWork.Projects.GetByKeyAsync(dto.Key);
+            _logger.LogInformation(
+                "Creating project {ProjectName} with key {ProjectKey} by user {UserId}.",
+                dto.Name,
+                dto.Key,
+                ownerId);
+
+            var existingProject =
+                await _unitOfWork.Projects.GetByKeyAsync(dto.Key);
 
             if (existingProject != null)
-                throw new ConflictException("La clé du projet est déjà utilisée.");
+            {
+                _logger.LogWarning(
+                    "Project creation failed. Project key {ProjectKey} is already in use.",
+                    dto.Key);
+
+                throw new ConflictException(
+                    "La clé du projet est déjà utilisée.");
+            }
 
             var project = new Project
             {
@@ -82,7 +133,6 @@ namespace BugTracker.Application.Services
                 Status = ProjectStatus.Active
             };
 
-            // Le Owner devient également Manager du projet.
             project.Members.Add(new ProjectMember
             {
                 UserId = ownerId,
@@ -92,15 +142,32 @@ namespace BugTracker.Application.Services
             await _unitOfWork.Projects.AddAsync(project);
             await _unitOfWork.SaveChangesAsync();
 
+            _logger.LogInformation(
+                "Project {ProjectId} created successfully with key {ProjectKey} by user {UserId}.",
+                project.Id,
+                project.Key,
+                ownerId);
+
             return project.ToDto();
         }
 
         public async Task<ProjectDto> UpdateAsync(Guid projectId, UpdateProjectDto dto)
         {
-            var project = await _unitOfWork.Projects.GetByIdAsync(projectId);
+            _logger.LogInformation(
+                "Updating project {ProjectId}.",
+                projectId);
+
+            var project =
+                await _unitOfWork.Projects.GetByIdAsync(projectId);
 
             if (project == null)
+            {
+                _logger.LogWarning(
+                    "Project update failed. Project {ProjectId} was not found.",
+                    projectId);
+
                 throw new NotFoundException("Projet non trouvé.");
+            }
 
             project.Name = dto.Name;
             project.Description = dto.Description;
@@ -108,78 +175,178 @@ namespace BugTracker.Application.Services
 
             await _unitOfWork.SaveChangesAsync();
 
+            _logger.LogInformation(
+                "Project {ProjectId} updated successfully.",
+                projectId);
+
             return project.ToDto();
         }
 
         public async Task ArchiveAsync(Guid projectId)
         {
-            var project = await _unitOfWork.Projects.GetByIdAsync(projectId);
+            _logger.LogInformation(
+                "Archiving project {ProjectId}.",
+                projectId);
+
+            var project =
+                await _unitOfWork.Projects.GetByIdAsync(projectId);
 
             if (project == null)
-                throw new NotFoundException("Projet non trouvé.");
+            {
+                _logger.LogWarning(
+                    "Project archive failed. Project {ProjectId} was not found.",
+                    projectId);
 
+                throw new NotFoundException("Projet non trouvé.");
+            }
 
             if (project.Status == ProjectStatus.Archived)
-                throw new BusinessRuleException("Le projet est déjà archivé.");
+            {
+                _logger.LogWarning(
+                    "Project {ProjectId} is already archived.",
+                    projectId);
+
+                throw new BusinessRuleException(
+                    "Le projet est déjà archivé.");
+            }
 
             project.Status = ProjectStatus.Archived;
             project.UpdatedAt = DateTime.UtcNow;
 
             await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Project {ProjectId} archived successfully.",
+                projectId);
         }
 
         public async Task ActivateAsync(Guid projectId)
         {
-            var project = await _unitOfWork.Projects.GetByIdAsync(projectId);
+            _logger.LogInformation(
+                "Activating project {ProjectId}.",
+                projectId);
+
+            var project =
+                await _unitOfWork.Projects.GetByIdAsync(projectId);
 
             if (project == null)
+            {
+                _logger.LogWarning(
+                    "Project activation failed. Project {ProjectId} was not found.",
+                    projectId);
+
                 throw new NotFoundException("Projet non trouvé.");
+            }
 
             if (project.Status == ProjectStatus.Active)
-                throw new BusinessRuleException("Le projet est déjà actif.");
+            {
+                _logger.LogWarning(
+                    "Project {ProjectId} is already active.",
+                    projectId);
+
+                throw new BusinessRuleException(
+                    "Le projet est déjà actif.");
+            }
 
             project.Status = ProjectStatus.Active;
             project.UpdatedAt = DateTime.UtcNow;
 
             await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Project {ProjectId} activated successfully.",
+                projectId);
         }
 
         public async Task ChangeOwnerAsync(Guid projectId, Guid newOwnerId)
         {
-            var project = await _unitOfWork.Projects.GetByIdAsync(projectId);
+            _logger.LogInformation(
+                "Changing owner of project {ProjectId} to user {NewOwnerId}.",
+                projectId,
+                newOwnerId);
+
+            var project =
+                await _unitOfWork.Projects.GetByIdAsync(projectId);
 
             if (project == null)
+            {
+                _logger.LogWarning(
+                    "Change owner failed. Project {ProjectId} was not found.",
+                    projectId);
+
                 throw new NotFoundException("Projet non trouvé.");
+            }
 
-
-            var newOwner = await _unitOfWork.Users.GetByIdAsync(newOwnerId);
+            var newOwner =
+                await _unitOfWork.Users.GetByIdAsync(newOwnerId);
 
             if (newOwner == null)
-                throw new NotFoundException("Le nouvel utilisateur n'existe pas.");
+            {
+                _logger.LogWarning(
+                    "Change owner failed. User {NewOwnerId} was not found.",
+                    newOwnerId);
+
+                throw new NotFoundException(
+                    "Le nouvel utilisateur n'existe pas.");
+            }
 
             if (!newOwner.IsActive)
-                throw new BusinessRuleException("Le nouvel utilisateur est désactivé.");
+            {
+                _logger.LogWarning(
+                    "Change owner failed. User {NewOwnerId} is inactive.",
+                    newOwnerId);
+
+                throw new BusinessRuleException(
+                    "Le nouvel utilisateur est désactivé.");
+            }
 
             if (project.OwnerId == newOwnerId)
-                throw new BusinessRuleException("Cet utilisateur est déjà propriétaire du projet.");
+            {
+                _logger.LogWarning(
+                    "Change owner failed. User {NewOwnerId} is already the owner of project {ProjectId}.",
+                    newOwnerId,
+                    projectId);
+
+                throw new BusinessRuleException(
+                    "Cet utilisateur est déjà propriétaire du projet.");
+            }
 
             project.OwnerId = newOwnerId;
             project.UpdatedAt = DateTime.UtcNow;
 
             await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Owner of project {ProjectId} changed successfully to user {NewOwnerId}.",
+                projectId,
+                newOwnerId);
         }
 
         public async Task DeleteAsync(Guid projectId)
         {
-            var project = await _unitOfWork.Projects.GetByIdAsync(projectId);
+            _logger.LogInformation(
+                "Deleting project {ProjectId}.",
+                projectId);
+
+            var project =
+                await _unitOfWork.Projects.GetByIdAsync(projectId);
 
             if (project == null)
-                throw new NotFoundException("Projet non trouvé.");
+            {
+                _logger.LogWarning(
+                    "Project deletion failed. Project {ProjectId} was not found.",
+                    projectId);
 
+                throw new NotFoundException("Projet non trouvé.");
+            }
 
             _unitOfWork.Projects.Delete(project);
 
             await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Project {ProjectId} deleted successfully.",
+                projectId);
         }
     }
 }

@@ -5,60 +5,99 @@ using BugTracker.Application.Interfaces.Services;
 using BugTracker.Application.Mappings;
 using BugTracker.Domain.Entities;
 using BugTracker.Domain.Enums;
+using Microsoft.Extensions.Logging;
 
 namespace BugTracker.Application.Services
 {
     public class SprintService : ISprintService
     {
         private readonly IUnitOfWork _unitOfWork;
+        private readonly ILogger<SprintService> _logger;
 
-        public SprintService(IUnitOfWork unitOfWork)
+        public SprintService(
+            IUnitOfWork unitOfWork,
+            ILogger<SprintService> logger)
         {
             _unitOfWork = unitOfWork;
+            _logger = logger;
         }
 
         public async Task<SprintDto?> GetByIdAsync(Guid sprintId)
         {
+            _logger.LogDebug(
+                "Retrieving sprint {SprintId}.",
+                sprintId);
+
             var sprint = await _unitOfWork.Sprints
                 .GetByIdAsync(sprintId);
 
             if (sprint == null)
+            {
+                _logger.LogWarning(
+                    "Sprint {SprintId} was not found.",
+                    sprintId);
+
                 return null;
+            }
 
             return sprint.ToDto();
         }
 
-        public async Task<IEnumerable<SprintDto>> GetAllByProjectAsync(Guid projectId)
+        public async Task<IEnumerable<SprintDto>> GetAllByProjectAsync(
+            Guid projectId)
         {
+            _logger.LogDebug(
+                "Retrieving sprints for project {ProjectId}.",
+                projectId);
+
             var sprints = await _unitOfWork.Sprints
                 .GetByProjectIdAsync(projectId);
+
+            _logger.LogDebug(
+                "Retrieved {SprintCount} sprints for project {ProjectId}.",
+                sprints.Count(),
+                projectId);
 
             return sprints
                 .Select(s => s.ToDto())
                 .ToList();
         }
 
-        public async Task<SprintDto> CreateAsync(Guid projectId, CreateSprintDto dto)
+        public async Task<SprintDto> CreateAsync(
+            Guid projectId,
+            CreateSprintDto dto)
         {
-            // 1. Vérifier que le projet existe
+            _logger.LogInformation(
+                "Creating sprint {SprintName} for project {ProjectId}.",
+                dto.Name,
+                projectId);
+
             var project = await _unitOfWork.Projects
                 .GetByIdAsync(projectId);
 
             if (project == null)
+            {
+                _logger.LogWarning(
+                    "Sprint creation failed. Project {ProjectId} was not found.",
+                    projectId);
+
                 throw new NotFoundException(
                     "Projet non trouvé.");
+            }
 
-
-            // 2. Vérifier les dates
             if (dto.StartDate.HasValue &&
                 dto.EndDate.HasValue &&
                 dto.EndDate <= dto.StartDate)
             {
+                _logger.LogWarning(
+                    "Sprint creation rejected for project {ProjectId}. " +
+                    "End date must be after start date.",
+                    projectId);
+
                 throw new BusinessRuleException(
                     "La date de fin doit être postérieure à la date de début.");
             }
 
-            // 3. Créer le sprint
             var sprint = new Sprint
             {
                 ProjectId = projectId,
@@ -69,146 +108,214 @@ namespace BugTracker.Application.Services
                 Status = SprintStatus.Planning
             };
 
-            // 4. Ajouter
             await _unitOfWork.Sprints.AddAsync(sprint);
 
-            // 5. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Sprint {SprintId} created successfully for project {ProjectId}.",
+                sprint.Id,
+                projectId);
 
             return sprint.ToDto();
         }
 
-        public async Task<SprintDto> UpdateAsync(Guid sprintId, UpdateSprintDto dto)
+        public async Task<SprintDto> UpdateAsync(
+            Guid sprintId,
+            UpdateSprintDto dto)
         {
-            // 1. Récupérer le sprint
+            _logger.LogInformation(
+                "Updating sprint {SprintId}.",
+                sprintId);
+
             var sprint = await _unitOfWork.Sprints
                 .GetByIdAsync(sprintId);
 
             if (sprint == null)
+            {
+                _logger.LogWarning(
+                    "Sprint update failed. Sprint {SprintId} was not found.",
+                    sprintId);
+
                 throw new NotFoundException(
                     "Sprint non trouvé.");
+            }
 
-            // 2. Règle métier :
-            // seul un Sprint Planning peut être modifié
             if (sprint.Status != SprintStatus.Planning)
             {
+                _logger.LogWarning(
+                    "Sprint update rejected. Sprint {SprintId} is not in Planning status.",
+                    sprintId);
+
                 throw new BusinessRuleException(
                     "Seul un sprint en Planning peut être modifié.");
             }
 
-            // 3. Vérifier les dates
             if (dto.StartDate.HasValue &&
                 dto.EndDate.HasValue &&
                 dto.EndDate <= dto.StartDate)
             {
+                _logger.LogWarning(
+                    "Sprint update rejected. Invalid date range for sprint {SprintId}.",
+                    sprintId);
+
                 throw new BusinessRuleException(
                     "La date de fin doit être postérieure à la date de début.");
             }
 
-            // 4. Modifier
             sprint.Name = dto.Name;
             sprint.Goal = dto.Goal;
             sprint.StartDate = dto.StartDate;
             sprint.EndDate = dto.EndDate;
 
-            // 5. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Sprint {SprintId} updated successfully.",
+                sprintId);
 
             return sprint.ToDto();
         }
 
         public async Task StartAsync(Guid sprintId)
         {
-            // 1. Récupérer le sprint
+            _logger.LogInformation(
+                "Starting sprint {SprintId}.",
+                sprintId);
+
             var sprint = await _unitOfWork.Sprints
                 .GetByIdAsync(sprintId);
 
             if (sprint == null)
+            {
+                _logger.LogWarning(
+                    "Start sprint failed. Sprint {SprintId} was not found.",
+                    sprintId);
+
                 throw new NotFoundException(
                     "Sprint non trouvé.");
+            }
 
-            // 2. Le Sprint doit être en Planning
             if (sprint.Status != SprintStatus.Planning)
             {
+                _logger.LogWarning(
+                    "Start sprint rejected. Sprint {SprintId} is not in Planning status.",
+                    sprintId);
+
                 throw new BusinessRuleException(
                     "Seul un sprint en Planning peut être démarré.");
             }
 
-
-            // 3. Un seul Sprint actif par projet
             var activeSprints = await _unitOfWork.Sprints
                 .GetActiveSprintsAsync(sprint.ProjectId);
 
             if (activeSprints.Any())
             {
+                _logger.LogWarning(
+                    "Start sprint rejected. Project {ProjectId} already has an active sprint.",
+                    sprint.ProjectId);
+
                 throw new BusinessRuleException(
                     "Un sprint est déjà actif pour ce projet.");
             }
 
-            // 4. Démarrer
             sprint.Status = SprintStatus.Active;
 
             await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Sprint {SprintId} started successfully for project {ProjectId}.",
+                sprintId,
+                sprint.ProjectId);
         }
 
         public async Task CompleteAsync(Guid sprintId)
         {
-            // 1. Récupérer le sprint
+            _logger.LogInformation(
+                "Completing sprint {SprintId}.",
+                sprintId);
+
             var sprint = await _unitOfWork.Sprints
                 .GetByIdAsync(sprintId);
 
             if (sprint == null)
+            {
+                _logger.LogWarning(
+                    "Complete sprint failed. Sprint {SprintId} was not found.",
+                    sprintId);
+
                 throw new NotFoundException(
                     "Sprint non trouvé.");
+            }
 
-            // 2. Le Sprint doit être actif
             if (sprint.Status != SprintStatus.Active)
             {
+                _logger.LogWarning(
+                    "Complete sprint rejected. Sprint {SprintId} is not active.",
+                    sprintId);
+
                 throw new BusinessRuleException(
                     "Seul un sprint actif peut être terminé.");
             }
 
-            // 3. Récupérer les Issues non terminées
             var unfinishedIssues = await _unitOfWork.Issues
                 .GetUnfinishedBySprintIdAsync(sprintId);
 
-            // 4. Remettre les Issues non terminées dans le Backlog
+            var unfinishedIssueCount = unfinishedIssues.Count();
+
             foreach (var issue in unfinishedIssues)
             {
                 issue.SprintId = null;
             }
 
-            // 5. Terminer le Sprint
             sprint.Status = SprintStatus.Completed;
             sprint.CompletedAt = DateTime.UtcNow;
 
-            // 6. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Sprint {SprintId} completed successfully. " +
+                "{IssueCount} unfinished issues were moved back to the backlog.",
+                sprintId,
+                unfinishedIssueCount);
         }
 
         public async Task DeleteAsync(Guid sprintId)
         {
-            // 1. Récupérer le sprint
+            _logger.LogInformation(
+                "Deleting sprint {SprintId}.",
+                sprintId);
+
             var sprint = await _unitOfWork.Sprints
                 .GetByIdAsync(sprintId);
 
             if (sprint == null)
+            {
+                _logger.LogWarning(
+                    "Sprint deletion failed. Sprint {SprintId} was not found.",
+                    sprintId);
+
                 throw new NotFoundException(
                     "Sprint non trouvé.");
+            }
 
-
-            // 2. Un Sprint actif ne peut pas être supprimé
             if (sprint.Status == SprintStatus.Active)
             {
+                _logger.LogWarning(
+                    "Sprint deletion rejected. Sprint {SprintId} is active.",
+                    sprintId);
+
                 throw new BusinessRuleException(
                     "Un sprint actif ne peut pas être supprimé.");
             }
 
-            // 3. Supprimer
             _unitOfWork.Sprints.Delete(sprint);
 
-            // 4. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Sprint {SprintId} deleted successfully.",
+                sprintId);
         }
     }
 }

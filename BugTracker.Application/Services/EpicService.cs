@@ -5,86 +5,154 @@ using BugTracker.Application.Interfaces.Services;
 using BugTracker.Application.Mappings;
 using BugTracker.Domain.Entities;
 using BugTracker.Domain.Enums;
+using Microsoft.Extensions.Logging;
 
 namespace BugTracker.Application.Services
 {
     public class EpicService : IEpicService
     {
         private readonly IUnitOfWork _unitOfWork;
+        private readonly ILogger<EpicService> _logger;
 
-        public EpicService(IUnitOfWork unitOfWork)
+        public EpicService(
+            IUnitOfWork unitOfWork,
+            ILogger<EpicService> logger)
         {
             _unitOfWork = unitOfWork;
+            _logger = logger;
         }
 
         public async Task<EpicDto?> GetByIdAsync(Guid epicId)
         {
+            _logger.LogDebug(
+                "Retrieving epic {EpicId}.",
+                epicId);
+
             var epic = await _unitOfWork.Epics
                 .GetByIdAsync(epicId);
 
             if (epic == null)
+            {
+                _logger.LogWarning(
+                    "Epic {EpicId} was not found.",
+                    epicId);
+
                 return null;
+            }
 
             return epic.ToDto();
         }
 
-        public async Task<EpicDetailsDto?> GetByIdWithDetailsAsync(Guid epicId)
+        public async Task<EpicDetailsDto?> GetByIdWithDetailsAsync(
+            Guid epicId)
         {
+            _logger.LogDebug(
+                "Retrieving epic {EpicId} with details.",
+                epicId);
+
             var epic = await _unitOfWork.Epics
                 .GetByIdWithDetailsAsync(epicId);
 
             if (epic == null)
+            {
+                _logger.LogWarning(
+                    "Epic {EpicId} was not found.",
+                    epicId);
+
                 return null;
+            }
 
             return epic.ToDetailsDto();
         }
 
-        public async Task<IEnumerable<EpicDto>> GetAllByProjectAsync(Guid projectId)
+        public async Task<IEnumerable<EpicDto>> GetAllByProjectAsync(
+            Guid projectId)
         {
+            _logger.LogDebug(
+                "Retrieving all epics for project {ProjectId}.",
+                projectId);
+
             var project = await _unitOfWork.Projects
                 .GetByIdAsync(projectId);
 
             if (project == null)
+            {
+                _logger.LogWarning(
+                    "Cannot retrieve epics. Project {ProjectId} was not found.",
+                    projectId);
+
                 throw new NotFoundException(
                     "Projet introuvable.");
+            }
 
             var epics = await _unitOfWork.Epics
                 .GetByProjectIdAsync(projectId);
 
+            _logger.LogDebug(
+                "Retrieved {EpicCount} epics for project {ProjectId}.",
+                epics.Count(),
+                projectId);
+
             return epics
                 .Select(e => e.ToDto())
                 .ToList();
         }
 
-        public async Task<IEnumerable<EpicDto>> GetActiveByProjectAsync(Guid projectId)
+        public async Task<IEnumerable<EpicDto>> GetActiveByProjectAsync(
+            Guid projectId)
         {
+            _logger.LogDebug(
+                "Retrieving active epics for project {ProjectId}.",
+                projectId);
+
             var project = await _unitOfWork.Projects
                 .GetByIdAsync(projectId);
 
             if (project == null)
+            {
+                _logger.LogWarning(
+                    "Cannot retrieve active epics. Project {ProjectId} was not found.",
+                    projectId);
+
                 throw new NotFoundException(
                     "Projet introuvable.");
+            }
 
             var epics = await _unitOfWork.Epics
                 .GetActiveEpicsAsync(projectId);
+
+            _logger.LogDebug(
+                "Retrieved {EpicCount} active epics for project {ProjectId}.",
+                epics.Count(),
+                projectId);
 
             return epics
                 .Select(e => e.ToDto())
                 .ToList();
         }
 
-        public async Task<EpicDto> CreateAsync(Guid projectId, CreateEpicDto dto)
+        public async Task<EpicDto> CreateAsync(
+            Guid projectId,
+            CreateEpicDto dto)
         {
-            // 1. Vérifier que le projet existe
+            _logger.LogInformation(
+                "Creating epic {EpicTitle} in project {ProjectId}.",
+                dto.Title,
+                projectId);
+
             var projectExists = await _unitOfWork.Projects
                 .ExistsAsync(projectId);
 
             if (!projectExists)
+            {
+                _logger.LogWarning(
+                    "Epic creation failed. Project {ProjectId} was not found.",
+                    projectId);
+
                 throw new NotFoundException(
                     "Projet non trouvé.");
+            }
 
-
-            // 2. Créer l'Epic
             var epic = new Epic
             {
                 ProjectId = projectId,
@@ -96,89 +164,141 @@ namespace BugTracker.Application.Services
 
             await _unitOfWork.Epics.AddAsync(epic);
 
-            // 3. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
 
-            // 4. Retourner le DTO
+            _logger.LogInformation(
+                "Epic {EpicId} created successfully in project {ProjectId}.",
+                epic.Id,
+                projectId);
+
             return epic.ToDto();
         }
 
-        public async Task<EpicDto> UpdateAsync(Guid epicId, UpdateEpicDto dto)
+        public async Task<EpicDto> UpdateAsync(
+            Guid epicId,
+            UpdateEpicDto dto)
         {
-            // 1. Récupérer l'Epic
+            _logger.LogInformation(
+                "Updating epic {EpicId}.",
+                epicId);
+
             var epic = await _unitOfWork.Epics
                 .GetByIdAsync(epicId);
 
             if (epic == null)
+            {
+                _logger.LogWarning(
+                    "Epic update failed. Epic {EpicId} was not found.",
+                    epicId);
+
                 throw new NotFoundException(
                     "Epic non trouvé.");
+            }
 
-            // 2. Règle métier :
-            // un Epic archivé ne peut plus être modifié
             if (epic.Status == EpicStatus.Archived)
             {
+                _logger.LogWarning(
+                    "Epic update rejected. Epic {EpicId} is archived.",
+                    epicId);
+
                 throw new BusinessRuleException(
                     "Impossible de modifier un Epic archivé.");
             }
 
-
-            // 3. Modifier
             epic.Title = dto.Title.Trim();
             epic.Description = dto.Description?.Trim();
             epic.ColorCode = dto.ColorCode;
 
-            // 4. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Epic {EpicId} updated successfully.",
+                epicId);
 
             return epic.ToDto();
         }
 
         public async Task DeleteAsync(Guid epicId)
         {
-            // 1. Charger l'Epic avec ses Issues
+            _logger.LogInformation(
+                "Deleting epic {EpicId}.",
+                epicId);
+
             var epic = await _unitOfWork.Epics
                 .GetByIdWithDetailsAsync(epicId);
 
             if (epic == null)
+            {
+                _logger.LogWarning(
+                    "Epic deletion failed. Epic {EpicId} was not found.",
+                    epicId);
+
                 throw new NotFoundException(
                     "Epic non trouvé.");
+            }
 
-            // 2. Détacher les Issues
+            var detachedIssueCount = epic.Issues.Count;
+
             foreach (var issue in epic.Issues)
             {
                 issue.EpicId = null;
             }
 
-            // 3. Supprimer l'Epic
             _unitOfWork.Epics.Delete(epic);
 
-            // 4. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Epic {EpicId} deleted successfully. " +
+                "{IssueCount} issues were detached.",
+                epicId,
+                detachedIssueCount);
         }
 
-        public async Task ChangeStatusAsync(Guid epicId, EpicStatus newStatus)
+        public async Task ChangeStatusAsync(
+            Guid epicId,
+            EpicStatus newStatus)
         {
-            // 1. Récupérer l'Epic
+            _logger.LogInformation(
+                "Changing status of epic {EpicId} to {NewStatus}.",
+                epicId,
+                newStatus);
+
             var epic = await _unitOfWork.Epics
                 .GetByIdAsync(epicId);
 
             if (epic == null)
+            {
+                _logger.LogWarning(
+                    "Change status failed. Epic {EpicId} was not found.",
+                    epicId);
+
                 throw new NotFoundException(
                     "Epic non trouvé.");
+            }
 
-            // 2. Vérifier la valeur de l'enum
             if (!Enum.IsDefined(typeof(EpicStatus), newStatus))
             {
+                _logger.LogWarning(
+                    "Change status rejected. Invalid status {NewStatus} for epic {EpicId}.",
+                    newStatus,
+                    epicId);
+
                 throw new BusinessRuleException(
                     "Le statut fourni est invalide.");
             }
 
+            var oldStatus = epic.Status;
 
-            // 3. Modifier le statut
             epic.Status = newStatus;
 
-            // 4. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Epic {EpicId} status changed from {OldStatus} to {NewStatus}.",
+                epicId,
+                oldStatus,
+                newStatus);
         }
     }
 }

@@ -5,6 +5,7 @@ using BugTracker.Application.Interfaces.Services;
 using BugTracker.Application.Mappings;
 using BugTracker.Domain.Entities;
 using BugTracker.Domain.Enums;
+using Microsoft.Extensions.Logging;
 
 namespace BugTracker.Application.Services
 {
@@ -13,36 +14,60 @@ namespace BugTracker.Application.Services
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUserService;
         private readonly IActivityLogService _activityLogService;
+        private readonly ILogger<CommentService> _logger;
 
         public CommentService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUserService,
-            IActivityLogService activityLogService)
+            IActivityLogService activityLogService,
+            ILogger<CommentService> logger)
         {
             _unitOfWork = unitOfWork;
             _currentUserService = currentUserService;
             _activityLogService = activityLogService;
+            _logger = logger;
         }
 
         public async Task<CommentDto?> GetByIdAsync(Guid commentId)
         {
+            _logger.LogDebug(
+                "Getting comment by Id. CommentId: {CommentId}",
+                commentId);
+
             var comment = await _unitOfWork.Comments
                 .GetByIdWithDetailsAsync(commentId);
 
             if (comment == null)
+            {
+                _logger.LogWarning(
+                    "Comment not found. CommentId: {CommentId}",
+                    commentId);
+
                 return null;
+            }
 
             return comment.ToDto();
         }
 
-        public async Task<IEnumerable<CommentDto>> GetByIssueAsync(Guid issueId)
+        public async Task<IEnumerable<CommentDto>> GetByIssueAsync(
+            Guid issueId)
         {
+            _logger.LogDebug(
+                "Getting comments for issue. IssueId: {IssueId}",
+                issueId);
+
             var issue = await _unitOfWork.Issues
                 .GetByIdAsync(issueId);
 
             if (issue == null)
+            {
+                _logger.LogWarning(
+                    "Cannot get comments because issue was not found. IssueId: {IssueId}",
+                    issueId);
+
                 throw new NotFoundException(
                     "Issue non trouvée.");
+            }
 
             var comments = await _unitOfWork.Comments
                 .GetByIssueIdAsync(issueId);
@@ -52,30 +77,45 @@ namespace BugTracker.Application.Services
                 .ToList();
         }
 
-        public async Task<CommentDto> CreateAsync(Guid issueId, CreateCommentDto dto)
+        public async Task<CommentDto> CreateAsync(
+            Guid issueId,
+            CreateCommentDto dto)
         {
+            var currentUserId =
+                _currentUserService.UserId;
+
+            _logger.LogInformation(
+                "Creating comment. IssueId: {IssueId}, UserId: {UserId}",
+                issueId,
+                currentUserId);
+
             // 1. Vérifier que l'Issue existe
             var issue = await _unitOfWork.Issues
                 .GetByIdAsync(issueId);
 
             if (issue == null)
+            {
+                _logger.LogWarning(
+                    "Cannot create comment because issue was not found. IssueId: {IssueId}",
+                    issueId);
+
                 throw new NotFoundException(
                     "Issue non trouvée.");
-
+            }
 
             // 2. Vérifier le contenu
             if (string.IsNullOrWhiteSpace(dto.Content))
             {
+                _logger.LogWarning(
+                    "Attempt to create an empty comment. IssueId: {IssueId}, UserId: {UserId}",
+                    issueId,
+                    currentUserId);
+
                 throw new BusinessRuleException(
                     "Le commentaire ne doit pas être vide.");
             }
 
-            // 3. Utilisateur courant nécessaire
-            // pour AuthorId et ActivityLog
-            var currentUserId =
-                _currentUserService.UserId;
-
-            // 4. Créer le commentaire
+            // 3. Créer le commentaire
             var comment = new Comment
             {
                 IssueId = issueId,
@@ -86,35 +126,59 @@ namespace BugTracker.Application.Services
             await _unitOfWork.Comments
                 .AddAsync(comment);
 
-            // 5. ActivityLog
+            // 4. ActivityLog
             await _activityLogService.LogAsync(
                 issueId,
                 currentUserId,
                 ActivityAction.Commented);
 
-            // 6. Sauvegarder
+            // 5. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Comment created successfully. CommentId: {CommentId}, IssueId: {IssueId}, UserId: {UserId}",
+                comment.Id,
+                issueId,
+                currentUserId);
 
             return comment.ToDto();
         }
 
-        public async Task<CommentDto> UpdateAsync(Guid commentId,UpdateCommentDto dto)
+        public async Task<CommentDto> UpdateAsync(
+            Guid commentId,
+            UpdateCommentDto dto)
         {
+            var currentUserId =
+                _currentUserService.UserId;
+
+            _logger.LogInformation(
+                "Updating comment. CommentId: {CommentId}, UserId: {UserId}",
+                commentId,
+                currentUserId);
+
             // 1. Récupérer le commentaire
             var comment = await _unitOfWork.Comments
                 .GetByIdAsync(commentId);
 
             if (comment == null)
+            {
+                _logger.LogWarning(
+                    "Cannot update comment because it was not found. CommentId: {CommentId}",
+                    commentId);
+
                 throw new NotFoundException(
                     "Commentaire non trouvé.");
+            }
 
-          
-
-            // 2. Règle métier :
-            // modification autorisée pendant 24 heures
+            // 2. Vérifier la fenêtre de modification de 24 heures
             if (DateTime.UtcNow >
                 comment.CreatedAt.AddHours(24))
             {
+                _logger.LogWarning(
+                    "Comment edit window expired. CommentId: {CommentId}, UserId: {UserId}",
+                    commentId,
+                    currentUserId);
+
                 throw new BusinessRuleException(
                     "COMMENT_EDIT_WINDOW_EXPIRED");
             }
@@ -122,6 +186,11 @@ namespace BugTracker.Application.Services
             // 3. Vérifier le contenu
             if (string.IsNullOrWhiteSpace(dto.Content))
             {
+                _logger.LogWarning(
+                    "Attempt to update comment with empty content. CommentId: {CommentId}, UserId: {UserId}",
+                    commentId,
+                    currentUserId);
+
                 throw new BusinessRuleException(
                     "Le commentaire ne doit pas être vide.");
             }
@@ -132,37 +201,56 @@ namespace BugTracker.Application.Services
             // 5. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
 
+            _logger.LogInformation(
+                "Comment updated successfully. CommentId: {CommentId}, UserId: {UserId}",
+                commentId,
+                currentUserId);
+
             return comment.ToDto();
         }
 
-        public async Task DeleteAsync(Guid commentId)
+        public async Task DeleteAsync(
+            Guid commentId)
         {
+            var currentUserId =
+                _currentUserService.UserId;
+
+            _logger.LogInformation(
+                "Deleting comment. CommentId: {CommentId}, UserId: {UserId}",
+                commentId,
+                currentUserId);
+
             // 1. Récupérer le commentaire
             var comment = await _unitOfWork.Comments
                 .GetByIdAsync(commentId);
 
             if (comment == null)
+            {
+                _logger.LogWarning(
+                    "Cannot delete comment because it was not found. CommentId: {CommentId}",
+                    commentId);
+
                 throw new NotFoundException(
                     "Commentaire non trouvé.");
+            }
 
-           
-
-            // 2. Utilisateur courant nécessaire
-            // pour ActivityLog
-            var currentUserId =
-                _currentUserService.UserId;
-
-            // 3. Supprimer
+            // 2. Supprimer
             _unitOfWork.Comments.Delete(comment);
 
-            // 4. ActivityLog
+            // 3. ActivityLog
             await _activityLogService.LogAsync(
                 comment.IssueId,
                 currentUserId,
                 ActivityAction.CommentDeleted);
 
-            // 5. Sauvegarder
+            // 4. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Comment deleted successfully. CommentId: {CommentId}, IssueId: {IssueId}, UserId: {UserId}",
+                commentId,
+                comment.IssueId,
+                currentUserId);
         }
     }
 }

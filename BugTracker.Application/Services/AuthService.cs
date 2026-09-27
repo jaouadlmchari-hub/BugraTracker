@@ -4,61 +4,76 @@ using BugTracker.Application.Exceptions;
 using BugTracker.Application.Interfaces.Persistence;
 using BugTracker.Application.Interfaces.Services;
 using BugTracker.Domain.Entities;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace BugTracker.Application.Services
 {
     public class AuthService : IAuthService
     {
- 
         private readonly IUnitOfWork _unitOfWork;
         private readonly IPasswordHasher _passwordHasher;
         private readonly ITokenService _tokenService;
         private readonly IRefreshTokenGenerator _refreshTokenGenerator;
         private readonly AuthenticationSettings _authenticationSettings;
+        private readonly ILogger<AuthService> _logger;
 
         public AuthService(
             IUnitOfWork unitOfWork,
             IPasswordHasher passwordHasher,
             ITokenService tokenService,
             IRefreshTokenGenerator refreshTokenGenerator,
-            IOptions<AuthenticationSettings> authenticationOptions)
+            IOptions<AuthenticationSettings> authenticationOptions,
+            ILogger<AuthService> logger)
         {
             _unitOfWork = unitOfWork;
             _passwordHasher = passwordHasher;
             _tokenService = tokenService;
             _refreshTokenGenerator = refreshTokenGenerator;
             _authenticationSettings = authenticationOptions.Value;
+            _logger = logger;
         }
 
         public async Task<AuthResponseDto> LoginAsync(LoginDto dto)
         {
-            // 1. Chercher l'utilisateur
+            _logger.LogInformation(
+                "Login attempt for email {Email}",
+                dto.Email);
+
             var user = await _unitOfWork.Users.GetByEmailAsync(dto.Email);
 
-            // 2. Email inexistant
             if (user == null)
             {
+                _logger.LogWarning(
+                    "Login failed: user not found for email {Email}",
+                    dto.Email);
+
                 throw new UnauthorizedException(
                     "Email ou mot de passe incorrect.");
             }
 
-            // 3. Compte désactivé
             if (!user.IsActive)
             {
+                _logger.LogWarning(
+                    "Login failed: inactive account for user {UserId}",
+                    user.Id);
+
                 throw new UnauthorizedException(
                     "Ce compte est désactivé.");
             }
 
-            // 4. Vérifier si le compte est actuellement verrouillé
             if (user.LockoutUntil.HasValue &&
                 user.LockoutUntil.Value > DateTime.UtcNow)
             {
+                _logger.LogWarning(
+                    "Login failed: account {UserId} is locked until {LockoutUntil}",
+                    user.Id,
+                    user.LockoutUntil);
+
                 throw new UnauthorizedException(
                     "Ce compte est temporairement verrouillé.");
             }
 
-            // 5. Vérifier le mot de passe
             var passwordIsValid =
                 _passwordHasher.Verify(
                     dto.Password,
@@ -68,11 +83,25 @@ namespace BugTracker.Application.Services
             {
                 user.FailedLoginAttempts++;
 
-                // 6. Verrouiller le compte après trop d'échecs
-                if (user.FailedLoginAttempts >= _authenticationSettings.MaxFailedLoginAttempts)
+                if (user.FailedLoginAttempts >=
+                    _authenticationSettings.MaxFailedLoginAttempts)
                 {
-                    user.LockoutUntil = DateTime.UtcNow.AddMinutes(
-                        _authenticationSettings.LockoutDurationMinutes);
+                    user.LockoutUntil =
+                        DateTime.UtcNow.AddMinutes(
+                            _authenticationSettings.LockoutDurationMinutes);
+
+                    _logger.LogWarning(
+                        "User {UserId} locked after {FailedAttempts} failed login attempts until {LockoutUntil}",
+                        user.Id,
+                        user.FailedLoginAttempts,
+                        user.LockoutUntil);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Login failed for user {UserId}. Failed attempts: {FailedAttempts}",
+                        user.Id,
+                        user.FailedLoginAttempts);
                 }
 
                 await _unitOfWork.SaveChangesAsync();
@@ -81,19 +110,15 @@ namespace BugTracker.Application.Services
                     "Email ou mot de passe incorrect.");
             }
 
-            // 7. Login réussi : réinitialiser le lockout
             user.FailedLoginAttempts = 0;
             user.LockoutUntil = null;
 
-            // 8. Générer l'Access Token
             var accessToken =
                 _tokenService.GenerateAccessToken(user);
 
-            // 9. Générer le Refresh Token
             var refreshTokenResult =
                 _refreshTokenGenerator.Generate();
 
-            // 10. Créer l'entité RefreshToken
             var refreshToken = new RefreshToken
             {
                 UserId = user.Id,
@@ -101,13 +126,14 @@ namespace BugTracker.Application.Services
                 ExpiresAt = refreshTokenResult.ExpiresAt
             };
 
-            // 11. Ajouter le Refresh Token
             await _unitOfWork.RefreshTokens.AddAsync(refreshToken);
 
-            // 12. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
 
-            // 13. Retourner les tokens
+            _logger.LogInformation(
+                "User {UserId} logged in successfully",
+                user.Id);
+
             return new AuthResponseDto
             {
                 AccessToken = accessToken.Token,
@@ -118,61 +144,74 @@ namespace BugTracker.Application.Services
 
         public async Task<AuthResponseDto> RefreshAsync(RefreshTokenDto dto)
         {
-            // 1. Chercher le Refresh Token en base
-            var existingRefreshToken = await _unitOfWork.RefreshTokens
-                .GetByTokenAsync(dto.RefreshToken);
+            _logger.LogInformation(
+                "Refresh token request received");
 
-            // 2. Vérifier qu'il existe
+            var existingRefreshToken =
+                await _unitOfWork.RefreshTokens
+                    .GetByTokenAsync(dto.RefreshToken);
+
             if (existingRefreshToken == null)
             {
+                _logger.LogWarning(
+                    "Refresh failed: token not found");
+
                 throw new UnauthorizedException(
                     "Refresh token invalide.");
             }
 
-            // 3. Vérifier qu'il n'est pas déjà révoqué
             if (existingRefreshToken.IsRevoked)
             {
+                _logger.LogWarning(
+                    "Refresh failed: token {RefreshTokenId} is already revoked",
+                    existingRefreshToken.Id);
+
                 throw new UnauthorizedException(
                     "Refresh token révoqué.");
             }
 
-            // 4. Vérifier qu'il n'est pas expiré
             if (existingRefreshToken.ExpiresAt <= DateTime.UtcNow)
             {
+                _logger.LogWarning(
+                    "Refresh failed: token {RefreshTokenId} is expired",
+                    existingRefreshToken.Id);
+
                 throw new UnauthorizedException(
                     "Refresh token expiré.");
             }
 
-            // 5. Récupérer l'utilisateur lié au token
             var user = await _unitOfWork.Users
                 .GetByIdAsync(existingRefreshToken.UserId);
 
             if (user == null)
             {
+                _logger.LogWarning(
+                    "Refresh failed: user {UserId} not found",
+                    existingRefreshToken.UserId);
+
                 throw new UnauthorizedException(
                     "Utilisateur introuvable.");
             }
 
-            // 6. Vérifier que le compte est toujours actif
             if (!user.IsActive)
             {
+                _logger.LogWarning(
+                    "Refresh failed: inactive user {UserId}",
+                    user.Id);
+
                 throw new UnauthorizedException(
                     "Ce compte est désactivé.");
             }
 
-            // 7. Révoquer l'ancien Refresh Token
             await _unitOfWork.RefreshTokens
                 .RevokeAsync(existingRefreshToken.Id);
 
-            // 8. Générer un nouvel Access Token
             var accessToken =
                 _tokenService.GenerateAccessToken(user);
 
-            // 9. Générer un nouveau Refresh Token
             var newRefreshTokenResult =
                 _refreshTokenGenerator.Generate();
 
-            // 10. Créer le nouveau Refresh Token
             var newRefreshToken = new RefreshToken
             {
                 UserId = user.Id,
@@ -180,14 +219,15 @@ namespace BugTracker.Application.Services
                 ExpiresAt = newRefreshTokenResult.ExpiresAt
             };
 
-            // 11. Ajouter le nouveau Refresh Token
             await _unitOfWork.RefreshTokens
                 .AddAsync(newRefreshToken);
 
-            // 12. Sauvegarder la rotation
             await _unitOfWork.SaveChangesAsync();
 
-            // 13. Retourner les nouveaux tokens
+            _logger.LogInformation(
+                "Refresh token rotated successfully for user {UserId}",
+                user.Id);
+
             return new AuthResponseDto
             {
                 AccessToken = accessToken.Token,
@@ -198,30 +238,40 @@ namespace BugTracker.Application.Services
 
         public async Task LogoutAsync(RefreshTokenDto dto)
         {
-            // 1. Chercher le Refresh Token
-            var refreshToken = await _unitOfWork.RefreshTokens
-                .GetByTokenAsync(dto.RefreshToken);
+            _logger.LogInformation(
+                "Logout request received");
 
-            // 2. Vérifier qu'il existe
+            var refreshToken =
+                await _unitOfWork.RefreshTokens
+                    .GetByTokenAsync(dto.RefreshToken);
+
             if (refreshToken == null)
             {
+                _logger.LogWarning(
+                    "Logout failed: refresh token not found");
+
                 throw new UnauthorizedException(
                     "Refresh token invalide.");
             }
 
-            // 3. Vérifier qu'il n'est pas déjà révoqué
             if (refreshToken.IsRevoked)
             {
+                _logger.LogWarning(
+                    "Logout failed: refresh token {RefreshTokenId} already revoked",
+                    refreshToken.Id);
+
                 throw new UnauthorizedException(
                     "Refresh token déjà révoqué.");
             }
 
-            // 4. Révoquer le Refresh Token
             await _unitOfWork.RefreshTokens
                 .RevokeAsync(refreshToken.Id);
 
-            // 5. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "User {UserId} logged out successfully",
+                refreshToken.UserId);
         }
     }
 }
