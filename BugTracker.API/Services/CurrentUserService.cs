@@ -38,6 +38,12 @@ namespace BugTracker.API.Services
             }
         }
 
+        public string? Email =>
+             _httpContextAccessor.HttpContext?
+                 .User
+                 .FindFirst(ClaimTypes.Email)?
+                 .Value;
+
         public bool IsAdmin =>
             _httpContextAccessor.HttpContext?
                 .User?
