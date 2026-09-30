@@ -1,4 +1,5 @@
 ﻿using BugTracker.Application.Interfaces.Repositories;
+using BugTracker.Domain.Interfaces.Repositories;
 
 
 namespace BugTracker.Application.Interfaces.Persistence
@@ -15,6 +16,7 @@ namespace BugTracker.Application.Interfaces.Persistence
         IAttachmentRepository Attachments { get; }
         IActivityLogRepository ActivityLogs { get; }
         IRefreshTokenRepository RefreshTokens { get; }
+        IAuditLogRepository AuditLogs { get; }
 
         Task<ITransaction> BeginTransactionAsync();
 

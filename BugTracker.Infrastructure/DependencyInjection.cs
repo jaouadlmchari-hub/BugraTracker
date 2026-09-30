@@ -2,6 +2,7 @@
 using BugTracker.Application.Interfaces.Persistence;
 using BugTracker.Application.Interfaces.Repositories;
 using BugTracker.Application.Interfaces.Services;
+using BugTracker.Domain.Interfaces.Repositories;
 using BugTracker.Infrastructure.Extensions;
 using BugTracker.Infrastructure.Persistence;
 using BugTracker.Infrastructure.Persistence.Repositories;
@@ -35,6 +36,7 @@ public static class DependencyInjection
         services.AddScoped<IAttachmentRepository, AttachmentRepository>();
         services.AddScoped<IActivityLogRepository, ActivityLogRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
+        services.AddScoped<IAuditLogRepository, AuditLogRepository>();
 
         // Unit Of Work
         services.AddScoped<IUnitOfWork, UnitOfWork>();

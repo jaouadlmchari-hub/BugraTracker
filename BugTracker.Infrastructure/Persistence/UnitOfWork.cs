@@ -1,5 +1,6 @@
 ﻿using BugTracker.Application.Interfaces.Persistence;
 using BugTracker.Application.Interfaces.Repositories;
+using BugTracker.Domain.Interfaces.Repositories;
 
 
 namespace BugTracker.Infrastructure.Persistence
@@ -18,6 +19,9 @@ namespace BugTracker.Infrastructure.Persistence
         public IAttachmentRepository Attachments { get; }
         public IActivityLogRepository ActivityLogs { get; }
         public IRefreshTokenRepository RefreshTokens { get; }
+        public IAuditLogRepository AuditLogs { get; }
+
+
 
         public UnitOfWork(
             BugTrackerDbContext context,
@@ -30,7 +34,8 @@ namespace BugTracker.Infrastructure.Persistence
             ICommentRepository comments,
             IAttachmentRepository attachments,
             IActivityLogRepository activityLogs,
-            IRefreshTokenRepository refreshTokens)
+            IRefreshTokenRepository refreshTokens,
+            IAuditLogRepository auditLogs)
         {
             _context = context;
 
@@ -44,6 +49,8 @@ namespace BugTracker.Infrastructure.Persistence
             Attachments = attachments;
             ActivityLogs = activityLogs;
             RefreshTokens = refreshTokens;
+            AuditLogs = auditLogs;
+
         }
 
 
