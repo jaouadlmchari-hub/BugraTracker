@@ -22,6 +22,7 @@ public static class DependencyInjection
         services.AddScoped<IActivityLogService, ActivityLogService>();
         services.AddScoped<IRefreshTokenService, RefreshTokenService>();
         services.AddScoped<IEpicService, EpicService>();
+        services.AddScoped<IAuditService, AuditService>();
 
         services.AddValidatorsFromAssemblyContaining<CreateSprintValidator>();
 

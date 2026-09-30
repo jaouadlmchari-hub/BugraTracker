@@ -1,5 +1,7 @@
-﻿using BugTracker.Application.DTOs.Sprints;
+﻿using BugTracker.Application.DTOs.Audit;
+using BugTracker.Application.DTOs.Sprints;
 using BugTracker.Application.Exceptions;
+using BugTracker.Application.Interfaces;
 using BugTracker.Application.Interfaces.Persistence;
 using BugTracker.Application.Interfaces.Services;
 using BugTracker.Application.Mappings;
@@ -12,13 +14,19 @@ namespace BugTracker.Application.Services
     public class SprintService : ISprintService
     {
         private readonly IUnitOfWork _unitOfWork;
+        private readonly ICurrentUserService _currentUserService;
+        private readonly IAuditService _auditService;
         private readonly ILogger<SprintService> _logger;
 
         public SprintService(
             IUnitOfWork unitOfWork,
+            ICurrentUserService currentUserService,
+            IAuditService auditService,
             ILogger<SprintService> logger)
         {
             _unitOfWork = unitOfWork;
+            _currentUserService = currentUserService;
+            _auditService = auditService;
             _logger = logger;
         }
 
@@ -43,8 +51,7 @@ namespace BugTracker.Application.Services
             return sprint.ToDto();
         }
 
-        public async Task<IEnumerable<SprintDto>> GetAllByProjectAsync(
-            Guid projectId)
+        public async Task<IEnumerable<SprintDto>> GetAllByProjectAsync(Guid projectId)
         {
             _logger.LogDebug(
                 "Retrieving sprints for project {ProjectId}.",
@@ -63,9 +70,7 @@ namespace BugTracker.Application.Services
                 .ToList();
         }
 
-        public async Task<SprintDto> CreateAsync(
-            Guid projectId,
-            CreateSprintDto dto)
+        public async Task<SprintDto> CreateAsync(Guid projectId,CreateSprintDto dto)
         {
             _logger.LogInformation(
                 "Creating sprint {SprintName} for project {ProjectId}.",
@@ -110,6 +115,18 @@ namespace BugTracker.Application.Services
 
             await _unitOfWork.Sprints.AddAsync(sprint);
 
+            // Audit : SprintCreated
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: _currentUserService.UserId,
+                UserEmail: _currentUserService.Email ?? string.Empty,
+                Action: AuditAction.SprintCreated,
+                EntityName: nameof(Sprint),
+                EntityId: sprint.Id.ToString(),
+                OldValue: null,
+                NewValue: $"Name: {sprint.Name}, Goal: {sprint.Goal}, StartDate: {sprint.StartDate}, EndDate: {sprint.EndDate}, Status: {sprint.Status}, ProjectId: {projectId}",
+                Details: $"Création du sprint '{sprint.Name}' dans le projet '{project.Name}'"
+            ));
+
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation(
@@ -120,9 +137,7 @@ namespace BugTracker.Application.Services
             return sprint.ToDto();
         }
 
-        public async Task<SprintDto> UpdateAsync(
-            Guid sprintId,
-            UpdateSprintDto dto)
+        public async Task<SprintDto> UpdateAsync(Guid sprintId,UpdateSprintDto dto)
         {
             _logger.LogInformation(
                 "Updating sprint {SprintId}.",
@@ -163,10 +178,26 @@ namespace BugTracker.Application.Services
                     "La date de fin doit être postérieure à la date de début.");
             }
 
+            var oldValues = $"Name: {sprint.Name}, Goal: {sprint.Goal}, StartDate: {sprint.StartDate}, EndDate: {sprint.EndDate}";
+
             sprint.Name = dto.Name;
             sprint.Goal = dto.Goal;
             sprint.StartDate = dto.StartDate;
             sprint.EndDate = dto.EndDate;
+
+            var newValues = $"Name: {sprint.Name}, Goal: {sprint.Goal}, StartDate: {sprint.StartDate}, EndDate: {sprint.EndDate}";
+
+            // Audit : SprintUpdated
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: _currentUserService.UserId,
+                UserEmail: _currentUserService.Email ?? string.Empty,
+                Action: AuditAction.SprintUpdated,
+                EntityName: nameof(Sprint),
+                EntityId: sprint.Id.ToString(),
+                OldValue: oldValues,
+                NewValue: newValues,
+                Details: $"Mise à jour du sprint '{sprint.Name}'"
+            ));
 
             await _unitOfWork.SaveChangesAsync();
 
@@ -219,7 +250,20 @@ namespace BugTracker.Application.Services
                     "Un sprint est déjà actif pour ce projet.");
             }
 
+            var oldStatus = sprint.Status;
             sprint.Status = SprintStatus.Active;
+
+            // Audit : SprintStarted
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: _currentUserService.UserId,
+                UserEmail: _currentUserService.Email ?? string.Empty,
+                Action: AuditAction.SprintStarted,
+                EntityName: nameof(Sprint),
+                EntityId: sprint.Id.ToString(),
+                OldValue: $"Status: {oldStatus}",
+                NewValue: $"Status: {sprint.Status}",
+                Details: $"Démarrage du sprint '{sprint.Name}'"
+            ));
 
             await _unitOfWork.SaveChangesAsync();
 
@@ -268,8 +312,21 @@ namespace BugTracker.Application.Services
                 issue.SprintId = null;
             }
 
+            var oldStatus = sprint.Status;
             sprint.Status = SprintStatus.Completed;
             sprint.CompletedAt = DateTime.UtcNow;
+
+            // Audit : SprintCompleted
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: _currentUserService.UserId,
+                UserEmail: _currentUserService.Email ?? string.Empty,
+                Action: AuditAction.SprintCompleted,
+                EntityName: nameof(Sprint),
+                EntityId: sprint.Id.ToString(),
+                OldValue: $"Status: {oldStatus}",
+                NewValue: $"Status: {sprint.Status}, CompletedAt: {sprint.CompletedAt}",
+                Details: $"Clôture du sprint '{sprint.Name}' ({unfinishedIssueCount} ticket(s) non terminé(s) replacé(s) dans le backlog)"
+            ));
 
             await _unitOfWork.SaveChangesAsync();
 
@@ -309,7 +366,21 @@ namespace BugTracker.Application.Services
                     "Un sprint actif ne peut pas être supprimé.");
             }
 
+            var oldValues = $"Name: {sprint.Name}, Status: {sprint.Status}, ProjectId: {sprint.ProjectId}";
+
             _unitOfWork.Sprints.Delete(sprint);
+
+            // Audit : SprintDeleted
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: _currentUserService.UserId,
+                UserEmail: _currentUserService.Email ?? string.Empty,
+                Action: AuditAction.SprintDeleted,
+                EntityName: nameof(Sprint),
+                EntityId: sprint.Id.ToString(),
+                OldValue: oldValues,
+                NewValue: null,
+                Details: $"Suppression du sprint '{sprint.Name}'"
+            ));
 
             await _unitOfWork.SaveChangesAsync();
 

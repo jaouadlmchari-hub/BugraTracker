@@ -1,5 +1,7 @@
-﻿using BugTracker.Application.DTOs.ProjectMembers;
+﻿using BugTracker.Application.DTOs.Audit;
+using BugTracker.Application.DTOs.ProjectMembers;
 using BugTracker.Application.Exceptions;
+using BugTracker.Application.Interfaces;
 using BugTracker.Application.Interfaces.Persistence;
 using BugTracker.Application.Interfaces.Services;
 using BugTracker.Application.Mappings;
@@ -12,17 +14,23 @@ namespace BugTracker.Application.Services
     public class ProjectMemberService : IProjectMemberService
     {
         private readonly IUnitOfWork _unitOfWork;
+        private readonly ICurrentUserService _currentUserService;
+        private readonly IAuditService _auditService;
         private readonly ILogger<ProjectMemberService> _logger;
 
         public ProjectMemberService(
             IUnitOfWork unitOfWork,
+            ICurrentUserService currentUserService,
+            IAuditService auditService,
             ILogger<ProjectMemberService> logger)
         {
             _unitOfWork = unitOfWork;
+            _currentUserService = currentUserService;
+            _auditService = auditService;
             _logger = logger;
         }
 
-        public async Task<IEnumerable<ProjectMemberDto>> GetMembersAsync( Guid projectId)
+        public async Task<IEnumerable<ProjectMemberDto>> GetMembersAsync(Guid projectId)
         {
             _logger.LogDebug(
                 "Retrieving members for project {ProjectId}.",
@@ -53,7 +61,7 @@ namespace BugTracker.Application.Services
                 .ToList();
         }
 
-        public async Task<ProjectMemberDto?> GetMemberAsync( Guid projectId, Guid userId)
+        public async Task<ProjectMemberDto?> GetMemberAsync(Guid projectId, Guid userId)
         {
             _logger.LogDebug(
                 "Retrieving member {UserId} from project {ProjectId}.",
@@ -74,9 +82,7 @@ namespace BugTracker.Application.Services
             return member?.ToDto();
         }
 
-        public async Task<bool> ShareAnyProjectAsync(
-            Guid firstUserId,
-            Guid secondUserId)
+        public async Task<bool> ShareAnyProjectAsync(Guid firstUserId, Guid secondUserId)
         {
             _logger.LogDebug(
                 "Checking whether users {FirstUserId} and {SecondUserId} share a project.",
@@ -89,9 +95,7 @@ namespace BugTracker.Application.Services
                     secondUserId);
         }
 
-        public async Task<ProjectMemberDto> AddMemberAsync(
-            Guid projectId,
-            AddProjectMemberDto dto)
+        public async Task<ProjectMemberDto> AddMemberAsync(Guid projectId, AddProjectMemberDto dto)
         {
             _logger.LogInformation(
                 "Adding user {UserId} to project {ProjectId} with role {Role}.",
@@ -171,6 +175,18 @@ namespace BugTracker.Application.Services
             await _unitOfWork.ProjectMembers
                 .AddAsync(projectMember);
 
+            // Audit : ProjectMemberAdded
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: _currentUserService.UserId,
+                UserEmail: _currentUserService.Email ?? string.Empty,
+                Action: AuditAction.ProjectMemberAdded,
+                EntityName: nameof(ProjectMember),
+                EntityId: $"{projectId}:{dto.UserId}",
+                OldValue: null,
+                NewValue: $"ProjectId: {projectId}, UserId: {dto.UserId}, Role: {dto.Role}",
+                Details: $"Ajout de l'utilisateur '{user.Email}' au projet '{project.Name}' avec le rôle '{dto.Role}'"
+            ));
+
             await _unitOfWork.SaveChangesAsync();
 
             projectMember.User = user;
@@ -184,10 +200,7 @@ namespace BugTracker.Application.Services
             return projectMember.ToDto();
         }
 
-        public async Task ChangeRoleAsync(
-            Guid projectId,
-            Guid userId,
-            ProjectRole newRole)
+        public async Task ChangeRoleAsync(Guid projectId,Guid userId,ProjectRole newRole)
         {
             _logger.LogInformation(
                 "Changing role of user {UserId} in project {ProjectId} to {NewRole}.",
@@ -271,6 +284,18 @@ namespace BugTracker.Application.Services
 
             memberToUpdate.Role = newRole;
 
+            // Audit : ProjectMemberRoleChanged
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: _currentUserService.UserId,
+                UserEmail: _currentUserService.Email ?? string.Empty,
+                Action: AuditAction.ProjectMemberRoleChanged,
+                EntityName: nameof(ProjectMember),
+                EntityId: $"{projectId}:{userId}",
+                OldValue: $"Role: {oldRole}",
+                NewValue: $"Role: {newRole}",
+                Details: $"Changement du rôle du membre {userId} dans le projet '{project.Name}' de '{oldRole}' vers '{newRole}'"
+            ));
+
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation(
@@ -281,9 +306,7 @@ namespace BugTracker.Application.Services
                 newRole);
         }
 
-        public async Task RemoveMemberAsync(
-            Guid projectId,
-            Guid userId)
+        public async Task RemoveMemberAsync(Guid projectId, Guid userId)
         {
             _logger.LogInformation(
                 "Removing user {UserId} from project {ProjectId}.",
@@ -373,8 +396,22 @@ namespace BugTracker.Application.Services
                 issue.AssigneeId = null;
             }
 
+            var oldRole = memberToRemove.Role;
+
             _unitOfWork.ProjectMembers.Delete(
                 memberToRemove);
+
+            // Audit : ProjectMemberRemoved
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: _currentUserService.UserId,
+                UserEmail: _currentUserService.Email ?? string.Empty,
+                Action: AuditAction.ProjectMemberRemoved,
+                EntityName: nameof(ProjectMember),
+                EntityId: $"{projectId}:{userId}",
+                OldValue: $"ProjectId: {projectId}, UserId: {userId}, Role: {oldRole}",
+                NewValue: null,
+                Details: $"Retrait de l'utilisateur {userId} du projet '{project.Name}' ({unassignedIssueCount} ticket(s) réaffecté(s))"
+            ));
 
             await _unitOfWork.SaveChangesAsync();
 
@@ -386,17 +423,13 @@ namespace BugTracker.Application.Services
                 unassignedIssueCount);
         }
 
-        public async Task<bool> IsMemberAsync(
-            Guid projectId,
-            Guid userId)
+        public async Task<bool> IsMemberAsync(Guid projectId, Guid userId)
         {
             return await _unitOfWork.ProjectMembers
                 .IsMemberAsync(projectId, userId);
         }
 
-        public async Task<bool> IsManagerAsync(
-            Guid projectId,
-            Guid userId)
+        public async Task<bool> IsManagerAsync(Guid projectId,Guid userId)
         {
             return await _unitOfWork.ProjectMembers
                 .IsManagerAsync(projectId, userId);

@@ -1,9 +1,12 @@
 ﻿using BugTracker.Application.Configuration;
+using BugTracker.Application.DTOs.Audit;
 using BugTracker.Application.DTOs.Auth;
 using BugTracker.Application.Exceptions;
+using BugTracker.Application.Interfaces;
 using BugTracker.Application.Interfaces.Persistence;
 using BugTracker.Application.Interfaces.Services;
 using BugTracker.Domain.Entities;
+using BugTracker.Domain.Enums;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -16,6 +19,7 @@ namespace BugTracker.Application.Services
         private readonly ITokenService _tokenService;
         private readonly IRefreshTokenGenerator _refreshTokenGenerator;
         private readonly AuthenticationSettings _authenticationSettings;
+        private readonly IAuditService _auditService;
         private readonly ILogger<AuthService> _logger;
 
         public AuthService(
@@ -24,6 +28,7 @@ namespace BugTracker.Application.Services
             ITokenService tokenService,
             IRefreshTokenGenerator refreshTokenGenerator,
             IOptions<AuthenticationSettings> authenticationOptions,
+            IAuditService auditService,
             ILogger<AuthService> logger)
         {
             _unitOfWork = unitOfWork;
@@ -31,6 +36,7 @@ namespace BugTracker.Application.Services
             _tokenService = tokenService;
             _refreshTokenGenerator = refreshTokenGenerator;
             _authenticationSettings = authenticationOptions.Value;
+            _auditService = auditService;
             _logger = logger;
         }
 
@@ -48,6 +54,16 @@ namespace BugTracker.Application.Services
                     "Login failed: user not found for email {Email}",
                     dto.Email);
 
+                //  Audit : LoginFailed (2)
+                await _auditService.LogAsync(new CreateAuditLogDto(
+                    UserId: null,
+                    UserEmail: dto.Email,
+                    Action: AuditAction.LoginFailed,
+                    EntityName: nameof(User),
+                    Details: "Échec de connexion : Utilisateur introuvable"
+                ));
+                await _unitOfWork.SaveChangesAsync();
+
                 throw new UnauthorizedException(
                     "Email ou mot de passe incorrect.");
             }
@@ -57,6 +73,17 @@ namespace BugTracker.Application.Services
                 _logger.LogWarning(
                     "Login failed: inactive account for user {UserId}",
                     user.Id);
+
+                //  Audit : LoginFailed (2)
+                await _auditService.LogAsync(new CreateAuditLogDto(
+                    UserId: user.Id,
+                    UserEmail: user.Email,
+                    Action: AuditAction.LoginFailed,
+                    EntityName: nameof(User),
+                    EntityId: user.Id.ToString(),
+                    Details: "Échec de connexion : Compte désactivé"
+                ));
+                await _unitOfWork.SaveChangesAsync();
 
                 throw new UnauthorizedException(
                     "Ce compte est désactivé.");
@@ -69,6 +96,17 @@ namespace BugTracker.Application.Services
                     "Login failed: account {UserId} is locked until {LockoutUntil}",
                     user.Id,
                     user.LockoutUntil);
+
+                //  Audit : LoginFailed (2)
+                await _auditService.LogAsync(new CreateAuditLogDto(
+                    UserId: user.Id,
+                    UserEmail: user.Email,
+                    Action: AuditAction.LoginFailed,
+                    EntityName: nameof(User),
+                    EntityId: user.Id.ToString(),
+                    Details: $"Échec de connexion : Compte verrouillé jusqu'à {user.LockoutUntil}"
+                ));
+                await _unitOfWork.SaveChangesAsync();
 
                 throw new UnauthorizedException(
                     "Ce compte est temporairement verrouillé.");
@@ -96,13 +134,16 @@ namespace BugTracker.Application.Services
                         user.FailedLoginAttempts,
                         user.LockoutUntil);
                 }
-                else
-                {
-                    _logger.LogWarning(
-                        "Login failed for user {UserId}. Failed attempts: {FailedAttempts}",
-                        user.Id,
-                        user.FailedLoginAttempts);
-                }
+
+                //  Audit : LoginFailed (2)
+                await _auditService.LogAsync(new CreateAuditLogDto(
+                    UserId: user.Id,
+                    UserEmail: user.Email,
+                    Action: AuditAction.LoginFailed,
+                    EntityName: nameof(User),
+                    EntityId: user.Id.ToString(),
+                    Details: $"Mot de passe incorrect (Tentative {user.FailedLoginAttempts}/{_authenticationSettings.MaxFailedLoginAttempts})"
+                ));
 
                 await _unitOfWork.SaveChangesAsync();
 
@@ -127,6 +168,16 @@ namespace BugTracker.Application.Services
             };
 
             await _unitOfWork.RefreshTokens.AddAsync(refreshToken);
+
+            //  Audit : LoginSucceeded (1)
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: user.Id,
+                UserEmail: user.Email,
+                Action: AuditAction.LoginSucceeded,
+                EntityName: nameof(User),
+                EntityId: user.Id.ToString(),
+                Details: "Connexion réussie"
+            ));
 
             await _unitOfWork.SaveChangesAsync();
 
@@ -222,6 +273,16 @@ namespace BugTracker.Application.Services
             await _unitOfWork.RefreshTokens
                 .AddAsync(newRefreshToken);
 
+            //  Audit : RefreshTokenUsed (4)
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: user.Id,
+                UserEmail: user.Email,
+                Action: AuditAction.RefreshTokenUsed,
+                EntityName: nameof(RefreshToken),
+                EntityId: existingRefreshToken.Id.ToString(),
+                Details: "Renouvellement réussi du jeton d'accès"
+            ));
+
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation(
@@ -264,8 +325,20 @@ namespace BugTracker.Application.Services
                     "Refresh token déjà révoqué.");
             }
 
+            var user = await _unitOfWork.Users.GetByIdAsync(refreshToken.UserId);
+
             await _unitOfWork.RefreshTokens
                 .RevokeAsync(refreshToken.Id);
+
+            //  Audit : Logout (3) & RefreshTokenRevoked (5)
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: refreshToken.UserId,
+                UserEmail: user?.Email,
+                Action: AuditAction.Logout,
+                EntityName: nameof(User),
+                EntityId: refreshToken.UserId.ToString(),
+                Details: "Déconnexion réussie"
+            ));
 
             await _unitOfWork.SaveChangesAsync();
 

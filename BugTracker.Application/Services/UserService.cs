@@ -1,6 +1,8 @@
-﻿using BugTracker.Application.DTOs.Common;
+﻿using BugTracker.Application.DTOs.Audit;
+using BugTracker.Application.DTOs.Common;
 using BugTracker.Application.DTOs.Users;
 using BugTracker.Application.Exceptions;
+using BugTracker.Application.Interfaces;
 using BugTracker.Application.Interfaces.Persistence;
 using BugTracker.Application.Interfaces.Services;
 using BugTracker.Application.Mappings;
@@ -14,15 +16,18 @@ namespace BugTracker.Application.Services
     {
         private readonly IUnitOfWork _unitOfWork;
         private readonly IPasswordHasher _passwordHasher;
+        private readonly IAuditService _auditService;
         private readonly ILogger<UserService> _logger;
 
         public UserService(
             IUnitOfWork unitOfWork,
             IPasswordHasher passwordHasher,
+            IAuditService auditService,
             ILogger<UserService> logger)
         {
             _unitOfWork = unitOfWork;
             _passwordHasher = passwordHasher;
+            _auditService = auditService;
             _logger = logger;
         }
 
@@ -115,6 +120,17 @@ namespace BugTracker.Application.Services
             };
 
             await _unitOfWork.Users.AddAsync(user);
+
+            //  Audit : UserCreated (10)
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: user.Id,
+                UserEmail: user.Email,
+                Action: AuditAction.UserCreated,
+                EntityName: nameof(User),
+                EntityId: user.Id.ToString(),
+                Details: $"Création du compte utilisateur '{user.Username}'"
+            ));
+
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation(
@@ -125,9 +141,7 @@ namespace BugTracker.Application.Services
             return user.ToDto();
         }
 
-        public async Task<UserDto> UpdateAsync(
-            Guid userId,
-            UpdateUserDto dto)
+        public async Task<UserDto> UpdateAsync(Guid userId, UpdateUserDto dto)
         {
             var user =
                 await _unitOfWork.Users.GetByIdAsync(userId);
@@ -178,6 +192,16 @@ namespace BugTracker.Application.Services
             user.AvatarUrl = dto.AvatarUrl;
             user.UpdatedAt = DateTime.UtcNow;
 
+            //  Audit : UserUpdated (11)
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: user.Id,
+                UserEmail: user.Email,
+                Action: AuditAction.UserUpdated,
+                EntityName: nameof(User),
+                EntityId: user.Id.ToString(),
+                Details: $"Mise à jour des informations de profil de '{user.Username}'"
+            ));
+
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation(
@@ -205,6 +229,16 @@ namespace BugTracker.Application.Services
             user.IsActive = false;
             user.UpdatedAt = DateTime.UtcNow;
 
+            //  Audit : UserDeactivated (12)
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: user.Id,
+                UserEmail: user.Email,
+                Action: AuditAction.UserDeactivated,
+                EntityName: nameof(User),
+                EntityId: user.Id.ToString(),
+                Details: $"Désactivation du compte utilisateur '{user.Username}'"
+            ));
+
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation(
@@ -229,6 +263,16 @@ namespace BugTracker.Application.Services
 
             user.IsActive = true;
             user.UpdatedAt = DateTime.UtcNow;
+
+            //  Audit : UserActivated (13)
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: user.Id,
+                UserEmail: user.Email,
+                Action: AuditAction.UserActivated,
+                EntityName: nameof(User),
+                EntityId: user.Id.ToString(),
+                Details: $"Réactivation du compte utilisateur '{user.Username}'"
+            ));
 
             await _unitOfWork.SaveChangesAsync();
 
@@ -286,6 +330,17 @@ namespace BugTracker.Application.Services
             };
 
             await _unitOfWork.Users.AddAsync(user);
+
+            //  Audit : UserCreated (10)
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: user.Id,
+                UserEmail: user.Email,
+                Action: AuditAction.UserCreated,
+                EntityName: nameof(User),
+                EntityId: user.Id.ToString(),
+                Details: $"Création administrative de l'utilisateur '{user.Username}' avec le rôle {user.SystemRole}"
+            ));
+
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation(
@@ -352,6 +407,16 @@ namespace BugTracker.Application.Services
             user.SystemRole = newRole;
             user.UpdatedAt = DateTime.UtcNow;
 
+            //  Audit : UserRoleChanged (14)
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: user.Id,
+                UserEmail: user.Email,
+                Action: AuditAction.UserRoleChanged,
+                EntityName: nameof(User),
+                EntityId: user.Id.ToString(),
+                Details: $"Changement de rôle système pour '{user.Username}' : {oldRole} -> {newRole}"
+            ));
+
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation(
@@ -413,6 +478,16 @@ namespace BugTracker.Application.Services
             user.LockoutUntil = null;
             user.UpdatedAt = DateTime.UtcNow;
 
+            //  Audit : PasswordChanged (15)
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: user.Id,
+                UserEmail: user.Email,
+                Action: AuditAction.PasswordChanged,
+                EntityName: nameof(User),
+                EntityId: user.Id.ToString(),
+                Details: $"Changement de mot de passe réussi pour l'utilisateur '{user.Username}'"
+            ));
+
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation(
@@ -442,6 +517,16 @@ namespace BugTracker.Application.Services
             user.LockoutUntil = null;
             user.UpdatedAt = DateTime.UtcNow;
 
+            //  Audit : PasswordReset (16)
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: user.Id,
+                UserEmail: user.Email,
+                Action: AuditAction.PasswordReset,
+                EntityName: nameof(User),
+                EntityId: user.Id.ToString(),
+                Details: $"Réinitialisation du mot de passe de l'utilisateur '{user.Username}'"
+            ));
+
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation(
@@ -467,6 +552,16 @@ namespace BugTracker.Application.Services
             user.FailedLoginAttempts = 0;
             user.LockoutUntil = null;
             user.UpdatedAt = DateTime.UtcNow;
+
+            //  Audit : UserUnlocked (17)
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: user.Id,
+                UserEmail: user.Email,
+                Action: AuditAction.UserUnlocked,
+                EntityName: nameof(User),
+                EntityId: user.Id.ToString(),
+                Details: $"Déverrouillage manuel du compte utilisateur '{user.Username}'"
+            ));
 
             await _unitOfWork.SaveChangesAsync();
 

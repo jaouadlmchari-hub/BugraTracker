@@ -1,5 +1,7 @@
-﻿using BugTracker.Application.DTOs.Epics;
+﻿using BugTracker.Application.DTOs.Audit;
+using BugTracker.Application.DTOs.Epics;
 using BugTracker.Application.Exceptions;
+using BugTracker.Application.Interfaces;
 using BugTracker.Application.Interfaces.Persistence;
 using BugTracker.Application.Interfaces.Services;
 using BugTracker.Application.Mappings;
@@ -12,13 +14,19 @@ namespace BugTracker.Application.Services
     public class EpicService : IEpicService
     {
         private readonly IUnitOfWork _unitOfWork;
+        private readonly ICurrentUserService _currentUserService;
+        private readonly IAuditService _auditService;
         private readonly ILogger<EpicService> _logger;
 
         public EpicService(
             IUnitOfWork unitOfWork,
+            ICurrentUserService currentUserService,
+            IAuditService auditService,
             ILogger<EpicService> logger)
         {
             _unitOfWork = unitOfWork;
+            _currentUserService = currentUserService;
+            _auditService = auditService;
             _logger = logger;
         }
 
@@ -43,8 +51,7 @@ namespace BugTracker.Application.Services
             return epic.ToDto();
         }
 
-        public async Task<EpicDetailsDto?> GetByIdWithDetailsAsync(
-            Guid epicId)
+        public async Task<EpicDetailsDto?> GetByIdWithDetailsAsync(Guid epicId)
         {
             _logger.LogDebug(
                 "Retrieving epic {EpicId} with details.",
@@ -65,8 +72,7 @@ namespace BugTracker.Application.Services
             return epic.ToDetailsDto();
         }
 
-        public async Task<IEnumerable<EpicDto>> GetAllByProjectAsync(
-            Guid projectId)
+        public async Task<IEnumerable<EpicDto>> GetAllByProjectAsync(Guid projectId)
         {
             _logger.LogDebug(
                 "Retrieving all epics for project {ProjectId}.",
@@ -98,8 +104,7 @@ namespace BugTracker.Application.Services
                 .ToList();
         }
 
-        public async Task<IEnumerable<EpicDto>> GetActiveByProjectAsync(
-            Guid projectId)
+        public async Task<IEnumerable<EpicDto>> GetActiveByProjectAsync(Guid projectId)
         {
             _logger.LogDebug(
                 "Retrieving active epics for project {ProjectId}.",
@@ -131,9 +136,7 @@ namespace BugTracker.Application.Services
                 .ToList();
         }
 
-        public async Task<EpicDto> CreateAsync(
-            Guid projectId,
-            CreateEpicDto dto)
+        public async Task<EpicDto> CreateAsync(Guid projectId,CreateEpicDto dto)
         {
             _logger.LogInformation(
                 "Creating epic {EpicTitle} in project {ProjectId}.",
@@ -164,6 +167,18 @@ namespace BugTracker.Application.Services
 
             await _unitOfWork.Epics.AddAsync(epic);
 
+            // Audit : EpicCreated
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: _currentUserService.UserId,
+                UserEmail: _currentUserService.Email ?? string.Empty,
+                Action: AuditAction.EpicCreated,
+                EntityName: nameof(Epic),
+                EntityId: epic.Id.ToString(),
+                OldValue: null,
+                NewValue: $"Title: {epic.Title}, ColorCode: {epic.ColorCode}, Status: {epic.Status}, ProjectId: {projectId}",
+                Details: $"Création de l'Epic '{epic.Title}' dans le projet {projectId}"
+            ));
+
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation(
@@ -174,9 +189,7 @@ namespace BugTracker.Application.Services
             return epic.ToDto();
         }
 
-        public async Task<EpicDto> UpdateAsync(
-            Guid epicId,
-            UpdateEpicDto dto)
+        public async Task<EpicDto> UpdateAsync(Guid epicId,UpdateEpicDto dto)
         {
             _logger.LogInformation(
                 "Updating epic {EpicId}.",
@@ -205,9 +218,25 @@ namespace BugTracker.Application.Services
                     "Impossible de modifier un Epic archivé.");
             }
 
+            var oldValues = $"Title: {epic.Title}, Description: {epic.Description}, ColorCode: {epic.ColorCode}";
+
             epic.Title = dto.Title.Trim();
             epic.Description = dto.Description?.Trim();
             epic.ColorCode = dto.ColorCode;
+
+            var newValues = $"Title: {epic.Title}, Description: {epic.Description}, ColorCode: {epic.ColorCode}";
+
+            // Audit : EpicUpdated
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: _currentUserService.UserId,
+                UserEmail: _currentUserService.Email ?? string.Empty,
+                Action: AuditAction.EpicUpdated,
+                EntityName: nameof(Epic),
+                EntityId: epic.Id.ToString(),
+                OldValue: oldValues,
+                NewValue: newValues,
+                Details: $"Mise à jour de l'Epic '{epic.Title}'"
+            ));
 
             await _unitOfWork.SaveChangesAsync();
 
@@ -238,6 +267,7 @@ namespace BugTracker.Application.Services
             }
 
             var detachedIssueCount = epic.Issues.Count;
+            var oldValues = $"Title: {epic.Title}, ColorCode: {epic.ColorCode}, Status: {epic.Status}, ProjectId: {epic.ProjectId}";
 
             foreach (var issue in epic.Issues)
             {
@@ -245,6 +275,18 @@ namespace BugTracker.Application.Services
             }
 
             _unitOfWork.Epics.Delete(epic);
+
+            // Audit : EpicDeleted
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: _currentUserService.UserId,
+                UserEmail: _currentUserService.Email ?? string.Empty,
+                Action: AuditAction.EpicDeleted,
+                EntityName: nameof(Epic),
+                EntityId: epic.Id.ToString(),
+                OldValue: oldValues,
+                NewValue: null,
+                Details: $"Suppression de l'Epic '{epic.Title}' ({detachedIssueCount} ticket(s) détaché(s))"
+            ));
 
             await _unitOfWork.SaveChangesAsync();
 
@@ -255,9 +297,7 @@ namespace BugTracker.Application.Services
                 detachedIssueCount);
         }
 
-        public async Task ChangeStatusAsync(
-            Guid epicId,
-            EpicStatus newStatus)
+        public async Task ChangeStatusAsync(Guid epicId,EpicStatus newStatus)
         {
             _logger.LogInformation(
                 "Changing status of epic {EpicId} to {NewStatus}.",
@@ -291,6 +331,18 @@ namespace BugTracker.Application.Services
             var oldStatus = epic.Status;
 
             epic.Status = newStatus;
+
+            // Audit : EpicStatusChanged (ou EpicUpdated selon votre enum AuditAction)
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: _currentUserService.UserId,
+                UserEmail: _currentUserService.Email ?? string.Empty,
+                Action: AuditAction.EpicUpdated,
+                EntityName: nameof(Epic),
+                EntityId: epic.Id.ToString(),
+                OldValue: $"Status: {oldStatus}",
+                NewValue: $"Status: {newStatus}",
+                Details: $"Changement du statut de l'Epic '{epic.Title}' de '{oldStatus}' vers '{newStatus}'"
+            ));
 
             await _unitOfWork.SaveChangesAsync();
 
