@@ -1,5 +1,7 @@
 ﻿using BugTracker.Application.DTOs.Attachments;
+using BugTracker.Application.DTOs.Audit;
 using BugTracker.Application.Exceptions;
+using BugTracker.Application.Interfaces;
 using BugTracker.Application.Interfaces.Persistence;
 using BugTracker.Application.Interfaces.Services;
 using BugTracker.Application.Mappings;
@@ -16,6 +18,7 @@ namespace BugTracker.Application.Services
         private readonly IFileValidationService _fileValidationService;
         private readonly IFileStorageService _fileStorageService;
         private readonly IActivityLogService _activityLogService;
+        private readonly IAuditService _auditService;
         private readonly ILogger<AttachmentService> _logger;
 
         public AttachmentService(
@@ -24,18 +27,19 @@ namespace BugTracker.Application.Services
             IFileValidationService fileValidationService,
             IFileStorageService fileStorageService,
             ILogger<AttachmentService> logger,
-            IActivityLogService activityLogService)
+            IActivityLogService activityLogService,
+            IAuditService auditService)
         {
             _unitOfWork = unitOfWork;
             _currentUserService = currentUserService;
             _fileValidationService = fileValidationService;
             _fileStorageService = fileStorageService;
             _activityLogService = activityLogService;
+            _auditService = auditService;
             _logger = logger;
         }
 
-        private async Task<string> GenerateDownloadUrlAsync(
-            Attachment attachment)
+        private async Task<string> GenerateDownloadUrlAsync(Attachment attachment)
         {
             _logger.LogDebug(
                 "Generating download URL. AttachmentId: {AttachmentId}, StorageKey: {StorageKey}",
@@ -47,8 +51,7 @@ namespace BugTracker.Application.Services
                 TimeSpan.FromHours(1));
         }
 
-        public async Task<AttachmentDto?> GetByIdAsync(
-            Guid attachmentId)
+        public async Task<AttachmentDto?> GetByIdAsync(Guid attachmentId)
         {
             _logger.LogDebug(
                 "Getting attachment by Id. AttachmentId: {AttachmentId}",
@@ -72,8 +75,7 @@ namespace BugTracker.Application.Services
             return attachment.ToDto(downloadUrl);
         }
 
-        public async Task<IEnumerable<AttachmentDto>> GetByIssueAsync(
-            Guid issueId)
+        public async Task<IEnumerable<AttachmentDto>> GetByIssueAsync(Guid issueId)
         {
             _logger.LogDebug(
                 "Getting attachments for issue. IssueId: {IssueId}",
@@ -114,9 +116,7 @@ namespace BugTracker.Application.Services
             return result;
         }
 
-        public async Task<AttachmentDto> UploadAsync(
-            Guid issueId,
-            CreateAttachmentDto dto)
+        public async Task<AttachmentDto> UploadAsync(Guid issueId, CreateAttachmentDto dto)
         {
             var currentUserId =
                 _currentUserService.UserId;
@@ -252,7 +252,19 @@ namespace BugTracker.Application.Services
                 currentUserId,
                 ActivityAction.AttachmentAdded);
 
-            // 9. Sauvegarder en BDD
+            // 9. Audit Log
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: currentUserId,
+                UserEmail: _currentUserService.Email ?? string.Empty,
+                Action: AuditAction.AttachmentUploaded,
+                EntityName: nameof(Attachment),
+                EntityId: attachment.Id.ToString(),
+                OldValue: null,
+                NewValue: attachment.Filename,
+                Details: $"Ajout de la pièce jointe '{attachment.Filename}' ({attachment.SizeBytes} octets) à l'issue '{issueId}'"
+            ));
+
+            // 10. Sauvegarder en BDD
             try
             {
                 await _unitOfWork.SaveChangesAsync();
@@ -282,7 +294,7 @@ namespace BugTracker.Application.Services
                 throw;
             }
 
-            // 10. Générer une URL pré-signée valable 1 heure
+            // 11. Générer une URL pré-signée valable 1 heure
             var downloadUrl =
                 await GenerateDownloadUrlAsync(attachment);
 
@@ -294,12 +306,11 @@ namespace BugTracker.Application.Services
                 dto.FileName,
                 dto.FileContent.Length);
 
-            // 11. Retourner le DTO
+            // 12. Retourner le DTO
             return attachment.ToDto(downloadUrl);
         }
 
-        public async Task<string> GetDownloadUrlAsync(
-            Guid attachmentId)
+        public async Task<string> GetDownloadUrlAsync(Guid attachmentId)
         {
             _logger.LogDebug(
                 "Generating download URL for attachment. AttachmentId: {AttachmentId}",
@@ -322,8 +333,7 @@ namespace BugTracker.Application.Services
                 attachment);
         }
 
-        public async Task DeleteAsync(
-            Guid attachmentId)
+        public async Task DeleteAsync(Guid attachmentId)
         {
             var currentUserId =
                 _currentUserService.UserId;
@@ -366,7 +376,19 @@ namespace BugTracker.Application.Services
                 storageKey,
                 null);
 
-            // 4. Valider d'abord la suppression BDD
+            // 4. Audit Log
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: currentUserId,
+                UserEmail: _currentUserService.Email ?? string.Empty,
+                Action: AuditAction.AttachmentDeleted,
+                EntityName: nameof(Attachment),
+                EntityId: attachment.Id.ToString(),
+                OldValue: attachment.Filename,
+                NewValue: null,
+                Details: $"Suppression de la pièce jointe '{attachment.Filename}' de l'issue '{issueId}'"
+            ));
+
+            // 5. Valider d'abord la suppression BDD
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation(
@@ -374,7 +396,7 @@ namespace BugTracker.Application.Services
                 attachmentId,
                 issueId);
 
-            // 5. Puis supprimer le vrai fichier de MinIO / S3
+            // 6. Puis supprimer le vrai fichier de MinIO / S3
             try
             {
                 await _fileStorageService.DeleteAsync(

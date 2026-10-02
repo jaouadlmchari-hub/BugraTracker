@@ -1,6 +1,8 @@
-﻿using BugTracker.Application.DTOs.Common;
+﻿using BugTracker.Application.DTOs.Audit;
+using BugTracker.Application.DTOs.Common;
 using BugTracker.Application.DTOs.Issues;
 using BugTracker.Application.Exceptions;
+using BugTracker.Application.Interfaces;
 using BugTracker.Application.Interfaces.Persistence;
 using BugTracker.Application.Interfaces.Services;
 using BugTracker.Application.Mappings;
@@ -15,17 +17,20 @@ namespace BugTracker.Application.Services
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUserService;
         private readonly IActivityLogService _activityLogService;
+        private readonly IAuditService _auditService;
         private readonly ILogger<IssueService> _logger;
 
         public IssueService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUserService,
             IActivityLogService activityLogService,
+            IAuditService auditService,
             ILogger<IssueService> logger)
         {
             _unitOfWork = unitOfWork;
             _currentUserService = currentUserService;
             _activityLogService = activityLogService;
+            _auditService = auditService;
             _logger = logger;
         }
 
@@ -50,9 +55,7 @@ namespace BugTracker.Application.Services
             return issue.ToDto();
         }
 
-        public async Task<PagedResultDto<IssueDto>> GetByProjectPaginatedAsync(
-            Guid projectId,
-            IssueFilterDto filter)
+        public async Task<PagedResultDto<IssueDto>> GetByProjectPaginatedAsync(Guid projectId,IssueFilterDto filter)
         {
             _logger.LogDebug(
                 "Getting paginated issues. ProjectId: {ProjectId}, PageNumber: {PageNumber}, PageSize: {PageSize}",
@@ -89,9 +92,7 @@ namespace BugTracker.Application.Services
             };
         }
 
-        private async Task ValidateEpicAsync(
-            Guid projectId,
-            Guid epicId)
+        private async Task ValidateEpicAsync(Guid projectId, Guid epicId)
         {
             var epic = await _unitOfWork.Epics
                 .GetByIdAsync(epicId);
@@ -128,9 +129,7 @@ namespace BugTracker.Application.Services
             }
         }
 
-        public async Task<IssueDto> CreateAsync(
-            Guid projectId,
-            CreateIssueDto dto)
+        public async Task<IssueDto> CreateAsync(Guid projectId,CreateIssueDto dto)
         {
             var currentUserId = _currentUserService.UserId;
 
@@ -227,14 +226,24 @@ namespace BugTracker.Application.Services
                 };
 
                 await _unitOfWork.Issues.AddAsync(issue);
-
-                // SQL Server génère l'Id avec NEWID()
                 await _unitOfWork.SaveChangesAsync();
 
                 await _activityLogService.LogAsync(
                     issue.Id,
                     currentUserId,
                     ActivityAction.Created);
+
+                // Audit: IssueCreated
+                await _auditService.LogAsync(new CreateAuditLogDto(
+                    UserId: currentUserId,
+                    UserEmail: _currentUserService.Email ?? string.Empty,
+                    Action: AuditAction.IssueCreated,
+                    EntityName: nameof(Issue),
+                    EntityId: issue.Id.ToString(),
+                    OldValue: null,
+                    NewValue: $"Title: {issue.Title}, Type: {issue.Type}, Priority: {issue.Priority}",
+                    Details: $"Création de l'issue '{issue.Title}' dans le projet '{projectId}'"
+                ));
 
                 await _unitOfWork.SaveChangesAsync();
 
@@ -276,9 +285,7 @@ namespace BugTracker.Application.Services
             }
         }
 
-        public async Task<IssueDto> UpdateAsync(
-            Guid issueId,
-            UpdateIssueDto dto)
+        public async Task<IssueDto> UpdateAsync(Guid issueId, UpdateIssueDto dto)
         {
             var currentUserId = _currentUserService.UserId;
 
@@ -299,6 +306,8 @@ namespace BugTracker.Application.Services
                 throw new NotFoundException("Issue non trouvée.");
             }
 
+            var oldValues = $"Title: {issue.Title}, Priority: {issue.Priority}, Type: {issue.Type}, StoryPoints: {issue.StoryPoints}, EpicId: {issue.EpicId}";
+
             issue.Title = dto.Title;
             issue.Description = dto.Description;
             issue.Type = dto.Type;
@@ -318,6 +327,20 @@ namespace BugTracker.Application.Services
 
                 issue.EpicId = dto.EpicId;
             }
+
+            var newValues = $"Title: {issue.Title}, Priority: {issue.Priority}, Type: {issue.Type}, StoryPoints: {issue.StoryPoints}, EpicId: {issue.EpicId}";
+
+            // Audit: IssueUpdated
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: currentUserId,
+                UserEmail: _currentUserService.Email ?? string.Empty,
+                Action: AuditAction.IssueUpdated,
+                EntityName: nameof(Issue),
+                EntityId: issue.Id.ToString(),
+                OldValue: oldValues,
+                NewValue: newValues,
+                Details: $"Mise à jour des informations de l'issue '{issue.Title}'"
+            ));
 
             await _unitOfWork.SaveChangesAsync();
 
@@ -342,9 +365,7 @@ namespace BugTracker.Application.Services
             return updatedIssue.ToDto();
         }
 
-        public async Task ChangeStatusAsync(
-            Guid issueId,
-            IssueStatus newStatus)
+        public async Task ChangeStatusAsync(Guid issueId,IssueStatus newStatus)
         {
             var issue = await _unitOfWork.Issues
                 .GetByIdWithDetailsAsync(issueId);
@@ -447,6 +468,18 @@ namespace BugTracker.Application.Services
                 oldStatus.ToString(),
                 newStatus.ToString());
 
+            // Audit: IssueUpdated / IssueStatusChanged
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: currentUserId,
+                UserEmail: _currentUserService.Email ?? string.Empty,
+                Action: AuditAction.IssueStatusChanged,
+                EntityName: nameof(Issue),
+                EntityId: issue.Id.ToString(),
+                OldValue: $"Status: {oldStatus}",
+                NewValue: $"Status: {newStatus}",
+                Details: $"Changement du statut de l'issue '{issue.Title}' de '{oldStatus}' vers '{newStatus}'"
+            ));
+
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation(
@@ -457,9 +490,7 @@ namespace BugTracker.Application.Services
                 currentUserId);
         }
 
-        public async Task ChangeStoryPointsAsync(
-            Guid issueId,
-            int? storyPoints)
+        public async Task ChangeStoryPointsAsync(Guid issueId,int? storyPoints)
         {
             var issue = await _unitOfWork.Issues
                 .GetByIdAsync(issueId);
@@ -478,6 +509,18 @@ namespace BugTracker.Application.Services
 
             issue.StoryPoints = storyPoints;
 
+            // Audit: IssueUpdated
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: _currentUserService.UserId,
+                UserEmail: _currentUserService.Email ?? string.Empty,
+                Action: AuditAction.IssueStoryPointsChanged,
+                EntityName: nameof(Issue),
+                EntityId: issue.Id.ToString(),
+                OldValue: $"StoryPoints: {oldStoryPoints?.ToString() ?? "None"}",
+                NewValue: $"StoryPoints: {storyPoints?.ToString() ?? "None"}",
+                Details: $"Modification des Story Points de l'issue '{issue.Title}'"
+            ));
+
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation(
@@ -487,9 +530,7 @@ namespace BugTracker.Application.Services
                 storyPoints);
         }
 
-        private static bool IsValidTransition(
-            IssueStatus currentStatus,
-            IssueStatus newStatus)
+        private static bool IsValidTransition(IssueStatus currentStatus,IssueStatus newStatus)
         {
             return
                 (currentStatus == IssueStatus.Todo &&
@@ -505,9 +546,7 @@ namespace BugTracker.Application.Services
                     newStatus == IssueStatus.Todo);
         }
 
-        public async Task AssignAsync(
-            Guid issueId,
-            Guid userId)
+        public async Task AssignAsync(Guid issueId,Guid userId)
         {
             var issue = await _unitOfWork.Issues
                 .GetByIdWithDetailsAsync(issueId);
@@ -564,6 +603,18 @@ namespace BugTracker.Application.Services
                 oldAssigneeId?.ToString(),
                 userId.ToString());
 
+            // Audit: IssueAssigned / IssueUpdated
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: currentUserId,
+                UserEmail: _currentUserService.Email ?? string.Empty,
+                Action: AuditAction.IssueAssigned,
+                EntityName: nameof(Issue),
+                EntityId: issue.Id.ToString(),
+                OldValue: $"AssigneeId: {oldAssigneeId?.ToString() ?? "Unassigned"}",
+                NewValue: $"AssigneeId: {userId}",
+                Details: $"Assignation de l'issue '{issue.Title}' à l'utilisateur '{userId}'"
+            ));
+
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation(
@@ -574,9 +625,7 @@ namespace BugTracker.Application.Services
                 currentUserId);
         }
 
-        public async Task MoveToSprintAsync(
-            Guid issueId,
-            Guid? sprintId)
+        public async Task MoveToSprintAsync(Guid issueId,Guid? sprintId)
         {
             var issue = await _unitOfWork.Issues
                 .GetByIdWithDetailsAsync(issueId);
@@ -667,6 +716,18 @@ namespace BugTracker.Application.Services
                 previousSprintId?.ToString(),
                 issue.SprintId?.ToString());
 
+            // Audit: IssueUpdated
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: currentUserId,
+                UserEmail: _currentUserService.Email ?? string.Empty,
+                Action: AuditAction.IssueSprintChanged,
+                EntityName: nameof(Issue),
+                EntityId: issue.Id.ToString(),
+                OldValue: $"SprintId: {previousSprintId?.ToString() ?? "Backlog"}",
+                NewValue: $"SprintId: {issue.SprintId?.ToString() ?? "Backlog"}",
+                Details: $"Déplacement de l'issue '{issue.Title}' vers le sprint '{issue.SprintId?.ToString() ?? "Backlog"}'"
+            ));
+
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation(
@@ -677,9 +738,7 @@ namespace BugTracker.Application.Services
                 currentUserId);
         }
 
-        public async Task MoveToEpicAsync(
-            Guid issueId,
-            Guid? epicId)
+        public async Task MoveToEpicAsync(Guid issueId,Guid? epicId)
         {
             var issue = await _unitOfWork.Issues
                 .GetByIdAsync(issueId);
@@ -705,6 +764,18 @@ namespace BugTracker.Application.Services
 
             issue.EpicId = epicId;
 
+            // Audit: IssueUpdated
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: _currentUserService.UserId,
+                UserEmail: _currentUserService.Email ?? string.Empty,
+                Action: AuditAction.IssueEpicChanged,
+                EntityName: nameof(Issue),
+                EntityId: issue.Id.ToString(),
+                OldValue: $"EpicId: {previousEpicId?.ToString() ?? "None"}",
+                NewValue: $"EpicId: {epicId?.ToString() ?? "None"}",
+                Details: $"Déplacement de l'issue '{issue.Title}' vers l'Epic '{epicId?.ToString() ?? "None"}'"
+            ));
+
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation(
@@ -714,8 +785,7 @@ namespace BugTracker.Application.Services
                 epicId);
         }
 
-        public async Task ReorderAsync(
-            IEnumerable<ReorderIssueItemDto> items)
+        public async Task ReorderAsync(IEnumerable<ReorderIssueItemDto> items)
         {
             var reorderItems = items.ToList();
 
@@ -783,8 +853,7 @@ namespace BugTracker.Application.Services
                 reorderItems.Count);
         }
 
-        public async Task DeleteAsync(
-            Guid issueId)
+        public async Task DeleteAsync(Guid issueId)
         {
             var currentUserId = _currentUserService.UserId;
 
@@ -802,6 +871,18 @@ namespace BugTracker.Application.Services
             }
 
             _unitOfWork.Issues.Delete(issue);
+
+            // Audit: IssueDeleted
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: currentUserId,
+                UserEmail: _currentUserService.Email ?? string.Empty,
+                Action: AuditAction.IssueDeleted,
+                EntityName: nameof(Issue),
+                EntityId: issue.Id.ToString(),
+                OldValue: $"Title: {issue.Title}, Status: {issue.Status}",
+                NewValue: null,
+                Details: $"Suppression de l'issue '{issue.Title}' (ID: {issue.Id})"
+            ));
 
             await _unitOfWork.SaveChangesAsync();
 

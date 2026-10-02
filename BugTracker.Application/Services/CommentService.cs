@@ -1,5 +1,7 @@
-﻿using BugTracker.Application.DTOs.Comments;
+﻿using BugTracker.Application.DTOs.Audit;
+using BugTracker.Application.DTOs.Comments;
 using BugTracker.Application.Exceptions;
+using BugTracker.Application.Interfaces;
 using BugTracker.Application.Interfaces.Persistence;
 using BugTracker.Application.Interfaces.Services;
 using BugTracker.Application.Mappings;
@@ -14,17 +16,20 @@ namespace BugTracker.Application.Services
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUserService;
         private readonly IActivityLogService _activityLogService;
+        private readonly IAuditService _auditService;
         private readonly ILogger<CommentService> _logger;
 
         public CommentService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUserService,
             IActivityLogService activityLogService,
+            IAuditService auditService,
             ILogger<CommentService> logger)
         {
             _unitOfWork = unitOfWork;
             _currentUserService = currentUserService;
             _activityLogService = activityLogService;
+            _auditService = auditService;
             _logger = logger;
         }
 
@@ -49,8 +54,7 @@ namespace BugTracker.Application.Services
             return comment.ToDto();
         }
 
-        public async Task<IEnumerable<CommentDto>> GetByIssueAsync(
-            Guid issueId)
+        public async Task<IEnumerable<CommentDto>> GetByIssueAsync(Guid issueId)
         {
             _logger.LogDebug(
                 "Getting comments for issue. IssueId: {IssueId}",
@@ -77,9 +81,7 @@ namespace BugTracker.Application.Services
                 .ToList();
         }
 
-        public async Task<CommentDto> CreateAsync(
-            Guid issueId,
-            CreateCommentDto dto)
+        public async Task<CommentDto> CreateAsync(Guid issueId, CreateCommentDto dto)
         {
             var currentUserId =
                 _currentUserService.UserId;
@@ -132,7 +134,19 @@ namespace BugTracker.Application.Services
                 currentUserId,
                 ActivityAction.Commented);
 
-            // 5. Sauvegarder
+            // 5. Audit Log
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: currentUserId,
+                UserEmail: _currentUserService.Email ?? string.Empty,
+                Action: AuditAction.CommentCreated,
+                EntityName: nameof(Comment),
+                EntityId: comment.Id.ToString(),
+                OldValue: null,
+                NewValue: comment.Content,
+                Details: $"Ajout d'un commentaire sur l'issue '{issueId}'"
+            ));
+
+            // 6. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation(
@@ -144,9 +158,7 @@ namespace BugTracker.Application.Services
             return comment.ToDto();
         }
 
-        public async Task<CommentDto> UpdateAsync(
-            Guid commentId,
-            UpdateCommentDto dto)
+        public async Task<CommentDto> UpdateAsync(Guid commentId, UpdateCommentDto dto)
         {
             var currentUserId =
                 _currentUserService.UserId;
@@ -195,10 +207,24 @@ namespace BugTracker.Application.Services
                     "Le commentaire ne doit pas être vide.");
             }
 
+            var oldContent = comment.Content;
+
             // 4. Modifier
             comment.Content = dto.Content.Trim();
 
-            // 5. Sauvegarder
+            // 5. Audit Log
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: currentUserId,
+                UserEmail: _currentUserService.Email ?? string.Empty,
+                Action: AuditAction.CommentUpdated,
+                EntityName: nameof(Comment),
+                EntityId: comment.Id.ToString(),
+                OldValue: oldContent,
+                NewValue: comment.Content,
+                Details: $"Mise à jour du commentaire (ID: {comment.Id})"
+            ));
+
+            // 6. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation(
@@ -209,8 +235,7 @@ namespace BugTracker.Application.Services
             return comment.ToDto();
         }
 
-        public async Task DeleteAsync(
-            Guid commentId)
+        public async Task DeleteAsync(Guid commentId)
         {
             var currentUserId =
                 _currentUserService.UserId;
@@ -243,7 +268,19 @@ namespace BugTracker.Application.Services
                 currentUserId,
                 ActivityAction.CommentDeleted);
 
-            // 4. Sauvegarder
+            // 4. Audit Log
+            await _auditService.LogAsync(new CreateAuditLogDto(
+                UserId: currentUserId,
+                UserEmail: _currentUserService.Email ?? string.Empty,
+                Action: AuditAction.CommentDeleted,
+                EntityName: nameof(Comment),
+                EntityId: comment.Id.ToString(),
+                OldValue: comment.Content,
+                NewValue: null,
+                Details: $"Suppression du commentaire (ID: {comment.Id}) lié à l'issue '{comment.IssueId}'"
+            ));
+
+            // 5. Sauvegarder
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation(
