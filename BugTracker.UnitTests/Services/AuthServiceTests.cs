@@ -1,13 +1,17 @@
 ﻿using BugTracker.Application.Configuration;
+using BugTracker.Application.DTOs.Audit;
 using BugTracker.Application.DTOs.Auth;
 using BugTracker.Application.Exceptions;
+using BugTracker.Application.Interfaces;
 using BugTracker.Application.Interfaces.Persistence;
 using BugTracker.Application.Interfaces.Repositories;
 using BugTracker.Application.Interfaces.Services;
 using BugTracker.Application.Models.Auth;
 using BugTracker.Application.Services;
 using BugTracker.Domain.Entities;
+using BugTracker.Domain.Enums;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
@@ -22,6 +26,8 @@ namespace BugTracker.UnitTests.Services
         private readonly Mock<IPasswordHasher> _passwordHasherMock;
         private readonly Mock<ITokenService> _tokenServiceMock;
         private readonly Mock<IRefreshTokenGenerator> _refreshTokenGeneratorMock;
+        private readonly Mock<IAuditService> _auditServiceMock;
+        private readonly Mock<ILogger<AuthService>> _loggerMock;
         private readonly AuthService _sut;
 
         public AuthServiceTests()
@@ -32,6 +38,8 @@ namespace BugTracker.UnitTests.Services
             _passwordHasherMock = new Mock<IPasswordHasher>();
             _tokenServiceMock = new Mock<ITokenService>();
             _refreshTokenGeneratorMock = new Mock<IRefreshTokenGenerator>();
+            _auditServiceMock = new Mock<IAuditService>();
+            _loggerMock = new Mock<ILogger<AuthService>>();
 
             _unitOfWorkMock.SetupGet(u => u.Users).Returns(_userRepositoryMock.Object);
             _unitOfWorkMock.SetupGet(u => u.RefreshTokens).Returns(_refreshTokenRepositoryMock.Object);
@@ -47,8 +55,12 @@ namespace BugTracker.UnitTests.Services
                 _passwordHasherMock.Object,
                 _tokenServiceMock.Object,
                 _refreshTokenGeneratorMock.Object,
-                authenticationOptions);
+                authenticationOptions,
+                _auditServiceMock.Object,
+                _loggerMock.Object);
         }
+
+        // ==================== LOGIN ====================
 
         [Fact]
         public async Task LoginAsync_WhenUserDoesNotExist_ShouldThrowUnauthorizedException()
@@ -88,9 +100,19 @@ namespace BugTracker.UnitTests.Services
                 r => r.AddAsync(It.IsAny<RefreshToken>()),
                 Times.Never);
 
+            _auditServiceMock.Verify(a => a.LogAsync(
+                 It.Is<CreateAuditLogDto>(d =>
+                     d.UserId == null &&
+                     d.UserEmail == "unknown@test.com" &&
+                     d.Action == AuditAction.LoginFailed &&
+                     d.EntityName == nameof(User) &&
+                     d.Details == "Échec de connexion : Utilisateur introuvable"),
+                 It.IsAny<CancellationToken>()),
+                 Times.Once);
+              
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
-                Times.Never);
+                Times.Once);
         }
 
         [Fact]
@@ -140,9 +162,20 @@ namespace BugTracker.UnitTests.Services
                 r => r.AddAsync(It.IsAny<RefreshToken>()),
                 Times.Never);
 
+            _auditServiceMock.Verify(a => a.LogAsync(
+                 It.Is<CreateAuditLogDto>(d =>
+                     d.UserId == user.Id &&
+                     d.UserEmail == user.Email &&
+                     d.Action == AuditAction.LoginFailed &&
+                     d.EntityName == nameof(User) &&
+                     d.EntityId == user.Id.ToString() &&
+                     d.Details == "Échec de connexion : Compte désactivé"),
+                 It.IsAny<CancellationToken>()),
+                 Times.Once);
+
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
-                Times.Never);
+                Times.Once);
         }
 
         [Fact]
@@ -155,6 +188,8 @@ namespace BugTracker.UnitTests.Services
                 Password = "Password123!"
             };
 
+            var lockoutUntil = DateTime.UtcNow.AddMinutes(10);
+
             var user = new User
             {
                 Id = Guid.NewGuid(),
@@ -163,7 +198,7 @@ namespace BugTracker.UnitTests.Services
                 PasswordHash = "hashed-password",
                 IsActive = true,
                 FailedLoginAttempts = 5,
-                LockoutUntil = DateTime.UtcNow.AddMinutes(10)
+                LockoutUntil = lockoutUntil
             };
 
             _userRepositoryMock
@@ -194,9 +229,21 @@ namespace BugTracker.UnitTests.Services
                 r => r.AddAsync(It.IsAny<RefreshToken>()),
                 Times.Never);
 
+            _auditServiceMock.Verify(a => a.LogAsync(
+               It.Is<CreateAuditLogDto>(d =>
+                   d.UserId == user.Id &&
+                   d.UserEmail == user.Email &&
+                   d.Action == AuditAction.LoginFailed &&
+                   d.EntityName == nameof(User) &&
+                   d.EntityId == user.Id.ToString() &&
+                   d.Details != null &&
+                   d.Details.Contains("Compte verrouillé jusqu'à")),
+               It.IsAny<CancellationToken>()),
+               Times.Once);
+
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
-                Times.Never);
+                Times.Once);
         }
 
         [Fact]
@@ -255,6 +302,17 @@ namespace BugTracker.UnitTests.Services
                 r => r.AddAsync(It.IsAny<RefreshToken>()),
                 Times.Never);
 
+            _auditServiceMock.Verify(a => a.LogAsync(
+               It.Is<CreateAuditLogDto>(d =>
+                   d.UserId == user.Id &&
+                   d.UserEmail == user.Email &&
+                   d.Action == AuditAction.LoginFailed &&
+                   d.EntityName == nameof(User) &&
+                   d.EntityId == user.Id.ToString() &&
+                   d.Details == "Mot de passe incorrect (Tentative 3/5)"),
+               It.IsAny<CancellationToken>()),
+               Times.Once);
+
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
                 Times.Once);
@@ -300,9 +358,7 @@ namespace BugTracker.UnitTests.Services
                 .WithMessage("Email ou mot de passe incorrect.");
 
             user.FailedLoginAttempts.Should().Be(5);
-
             user.LockoutUntil.Should().NotBeNull();
-
             user.LockoutUntil!.Value.Should()
                 .BeOnOrAfter(beforeLockout.AddMinutes(15));
 
@@ -317,6 +373,17 @@ namespace BugTracker.UnitTests.Services
             _refreshTokenRepositoryMock.Verify(
                 r => r.AddAsync(It.IsAny<RefreshToken>()),
                 Times.Never);
+
+            _auditServiceMock.Verify(a => a.LogAsync(
+               It.Is<CreateAuditLogDto>(d =>
+                   d.UserId == user.Id &&
+                   d.UserEmail == user.Email &&
+                   d.Action == AuditAction.LoginFailed &&
+                   d.EntityName == nameof(User) &&
+                   d.EntityId == user.Id.ToString() &&
+                   d.Details == "Mot de passe incorrect (Tentative 5/5)"),
+               It.IsAny<CancellationToken>()),
+               Times.Once);
 
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
@@ -411,10 +478,23 @@ namespace BugTracker.UnitTests.Services
                 r => r.AddAsync(It.IsAny<RefreshToken>()),
                 Times.Once);
 
+            _auditServiceMock.Verify(a => a.LogAsync(
+              It.Is<CreateAuditLogDto>(d =>
+                  d.UserId == userId &&
+                  d.UserEmail == user.Email &&
+                  d.Action == AuditAction.LoginSucceeded &&
+                  d.EntityName == nameof(User) &&
+                  d.EntityId == userId.ToString() &&
+                  d.Details == "Connexion réussie"),
+              It.IsAny<CancellationToken>()),
+              Times.Once);
+
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
                 Times.Once);
         }
+
+        // ==================== REFRESH ====================
 
         [Fact]
         public async Task RefreshAsync_WhenRefreshTokenDoesNotExist_ShouldThrowUnauthorizedException()
@@ -452,6 +532,10 @@ namespace BugTracker.UnitTests.Services
             _refreshTokenRepositoryMock.Verify(
                 r => r.AddAsync(It.IsAny<RefreshToken>()),
                 Times.Never);
+
+            _auditServiceMock.Verify(
+               a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+               Times.Never);
 
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
@@ -504,6 +588,10 @@ namespace BugTracker.UnitTests.Services
                 r => r.Generate(),
                 Times.Never);
 
+            _auditServiceMock.Verify(
+              a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+              Times.Never);
+
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
                 Times.Never);
@@ -554,6 +642,10 @@ namespace BugTracker.UnitTests.Services
             _refreshTokenGeneratorMock.Verify(
                 r => r.Generate(),
                 Times.Never);
+
+            _auditServiceMock.Verify(
+               a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+               Times.Never);
 
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
@@ -611,6 +703,10 @@ namespace BugTracker.UnitTests.Services
             _refreshTokenRepositoryMock.Verify(
                 r => r.AddAsync(It.IsAny<RefreshToken>()),
                 Times.Never);
+
+            _auditServiceMock.Verify(
+               a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+               Times.Never);
 
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
@@ -678,6 +774,10 @@ namespace BugTracker.UnitTests.Services
                 r => r.AddAsync(It.IsAny<RefreshToken>()),
                 Times.Never);
 
+            _auditServiceMock.Verify(
+              a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+              Times.Never);
+
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
                 Times.Never);
@@ -689,7 +789,6 @@ namespace BugTracker.UnitTests.Services
             // Arrange
             var userId = Guid.NewGuid();
             var oldRefreshTokenId = Guid.NewGuid();
-
             var accessTokenExpiresAt = DateTime.UtcNow.AddMinutes(15);
             var newRefreshTokenExpiresAt = DateTime.UtcNow.AddDays(7);
 
@@ -780,10 +879,23 @@ namespace BugTracker.UnitTests.Services
                 r => r.AddAsync(It.IsAny<RefreshToken>()),
                 Times.Once);
 
+            _auditServiceMock.Verify(a => a.LogAsync(
+               It.Is<CreateAuditLogDto>(d =>
+                   d.UserId == userId &&
+                   d.UserEmail == user.Email &&
+                   d.Action == AuditAction.RefreshTokenUsed &&
+                   d.EntityName == nameof(RefreshToken) &&
+                   d.EntityId == oldRefreshTokenId.ToString() &&
+                   d.Details == "Renouvellement réussi du jeton d'accès"),
+               It.IsAny<CancellationToken>()),
+               Times.Once);
+
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
                 Times.Once);
         }
+
+        // ==================== LOGOUT ====================
 
         [Fact]
         public async Task LogoutAsync_WhenRefreshTokenDoesNotExist_ShouldThrowUnauthorizedException()
@@ -809,6 +921,10 @@ namespace BugTracker.UnitTests.Services
             _refreshTokenRepositoryMock.Verify(
                 r => r.RevokeAsync(It.IsAny<Guid>()),
                 Times.Never);
+
+            _auditServiceMock.Verify(
+              a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+              Times.Never);
 
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
@@ -849,6 +965,10 @@ namespace BugTracker.UnitTests.Services
                 r => r.RevokeAsync(It.IsAny<Guid>()),
                 Times.Never);
 
+            _auditServiceMock.Verify(
+              a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+              Times.Never);
+
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
                 Times.Never);
@@ -859,6 +979,7 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var refreshTokenId = Guid.NewGuid();
+            var userId = Guid.NewGuid();
 
             var dto = new RefreshTokenDto
             {
@@ -868,15 +989,28 @@ namespace BugTracker.UnitTests.Services
             var refreshToken = new RefreshToken
             {
                 Id = refreshTokenId,
-                UserId = Guid.NewGuid(),
+                UserId = userId,
                 Token = dto.RefreshToken,
                 ExpiresAt = DateTime.UtcNow.AddDays(5),
                 IsRevoked = false
             };
 
+            var user = new User
+            {
+                Id = userId,
+                Email = "jaouad@test.com",
+                Username = "jaouad",
+                PasswordHash = "hashed-password",
+                IsActive = true
+            };
+
             _refreshTokenRepositoryMock
                 .Setup(r => r.GetByTokenAsync(dto.RefreshToken))
                 .ReturnsAsync(refreshToken);
+
+            _userRepositoryMock
+                .Setup(r => r.GetByIdAsync(userId))
+                .ReturnsAsync(user);
 
             _refreshTokenRepositoryMock
                 .Setup(r => r.RevokeAsync(refreshTokenId))
@@ -890,10 +1024,20 @@ namespace BugTracker.UnitTests.Services
                 r => r.RevokeAsync(refreshTokenId),
                 Times.Once);
 
+            _auditServiceMock.Verify(a => a.LogAsync(
+              It.Is<CreateAuditLogDto>(d =>
+                  d.UserId == userId &&
+                  d.UserEmail == user.Email &&
+                  d.Action == AuditAction.Logout &&
+                  d.EntityName == nameof(User) &&
+                  d.EntityId == userId.ToString() &&
+                  d.Details == "Déconnexion réussie"),
+              It.IsAny<CancellationToken>()),
+              Times.Once);
+
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
                 Times.Once);
         }
-
     }
 }

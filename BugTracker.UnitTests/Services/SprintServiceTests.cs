@@ -1,11 +1,15 @@
-﻿using BugTracker.Application.DTOs.Sprints;
+﻿using BugTracker.Application.DTOs.Audit;
+using BugTracker.Application.DTOs.Sprints;
 using BugTracker.Application.Exceptions;
+using BugTracker.Application.Interfaces;
 using BugTracker.Application.Interfaces.Persistence;
 using BugTracker.Application.Interfaces.Repositories;
+using BugTracker.Application.Interfaces.Services;
 using BugTracker.Application.Services;
 using BugTracker.Domain.Entities;
 using BugTracker.Domain.Enums;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Moq;
 
 namespace BugTracker.UnitTests.Services
@@ -16,7 +20,13 @@ namespace BugTracker.UnitTests.Services
         private readonly Mock<ISprintRepository> _sprintRepositoryMock;
         private readonly Mock<IProjectRepository> _projectRepositoryMock;
         private readonly Mock<IIssueRepository> _issueRepositoryMock;
+        private readonly Mock<ICurrentUserService> _currentUserServiceMock;
+        private readonly Mock<IAuditService> _auditServiceMock;
+        private readonly Mock<ILogger<SprintService>> _loggerMock;
         private readonly SprintService _sut;
+
+        private readonly Guid _currentUserId = Guid.NewGuid();
+        private const string CurrentUserEmail = "test@example.com";
 
         public SprintServiceTests()
         {
@@ -24,21 +34,35 @@ namespace BugTracker.UnitTests.Services
             _sprintRepositoryMock = new Mock<ISprintRepository>();
             _projectRepositoryMock = new Mock<IProjectRepository>();
             _issueRepositoryMock = new Mock<IIssueRepository>();
+            _currentUserServiceMock = new Mock<ICurrentUserService>();
+            _auditServiceMock = new Mock<IAuditService>();
+            _loggerMock = new Mock<ILogger<SprintService>>();
 
             _unitOfWorkMock
                 .SetupGet(u => u.Sprints)
                 .Returns(_sprintRepositoryMock.Object);
-
             _unitOfWorkMock
                 .SetupGet(u => u.Projects)
                 .Returns(_projectRepositoryMock.Object);
-
             _unitOfWorkMock
                 .SetupGet(u => u.Issues)
                 .Returns(_issueRepositoryMock.Object);
 
-            _sut = new SprintService(_unitOfWorkMock.Object);
+            _currentUserServiceMock
+                .SetupGet(c => c.UserId)
+                .Returns(_currentUserId);
+            _currentUserServiceMock
+                .SetupGet(c => c.Email)
+                .Returns(CurrentUserEmail);
+
+            _sut = new SprintService(
+                _unitOfWorkMock.Object,
+                _currentUserServiceMock.Object,
+                _auditServiceMock.Object,
+                _loggerMock.Object);
         }
+
+        // ───────────────────────── StartAsync ─────────────────────────
 
         [Fact]
         public async Task StartAsync_WhenSprintIsPlanningAndNoActiveSprint_ShouldStartSprint()
@@ -46,7 +70,6 @@ namespace BugTracker.UnitTests.Services
             // Arrange
             var sprintId = Guid.NewGuid();
             var projectId = Guid.NewGuid();
-
             var sprint = new Sprint
             {
                 Id = sprintId,
@@ -58,7 +81,6 @@ namespace BugTracker.UnitTests.Services
             _sprintRepositoryMock
                 .Setup(r => r.GetByIdAsync(sprintId))
                 .ReturnsAsync(sprint);
-
             _sprintRepositoryMock
                 .Setup(r => r.GetActiveSprintsAsync(projectId))
                 .ReturnsAsync(new List<Sprint>());
@@ -68,6 +90,14 @@ namespace BugTracker.UnitTests.Services
 
             // Assert
             sprint.Status.Should().Be(SprintStatus.Active);
+
+            _auditServiceMock.Verify(
+                a => a.LogAsync(It.Is<CreateAuditLogDto>(dto =>
+                    dto.Action == AuditAction.SprintStarted &&
+                    dto.EntityId == sprintId.ToString() &&
+                    dto.UserId == _currentUserId),
+                     It.IsAny<CancellationToken>()),
+                Times.Once);
 
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
@@ -79,7 +109,6 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var sprintId = Guid.NewGuid();
-
             var sprint = new Sprint
             {
                 Id = sprintId,
@@ -99,6 +128,10 @@ namespace BugTracker.UnitTests.Services
             await act.Should()
                 .ThrowAsync<BusinessRuleException>();
 
+            _auditServiceMock.Verify(
+             a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+             Times.Never);
+
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
                 Times.Never);
@@ -110,7 +143,6 @@ namespace BugTracker.UnitTests.Services
             // Arrange
             var sprintId = Guid.NewGuid();
             var projectId = Guid.NewGuid();
-
             var sprint = new Sprint
             {
                 Id = sprintId,
@@ -118,7 +150,6 @@ namespace BugTracker.UnitTests.Services
                 Name = "Sprint 2",
                 Status = SprintStatus.Planning
             };
-
             var activeSprint = new Sprint
             {
                 Id = Guid.NewGuid(),
@@ -130,7 +161,6 @@ namespace BugTracker.UnitTests.Services
             _sprintRepositoryMock
                 .Setup(r => r.GetByIdAsync(sprintId))
                 .ReturnsAsync(sprint);
-
             _sprintRepositoryMock
                 .Setup(r => r.GetActiveSprintsAsync(projectId))
                 .ReturnsAsync(new List<Sprint> { activeSprint });
@@ -143,6 +173,11 @@ namespace BugTracker.UnitTests.Services
                 .ThrowAsync<BusinessRuleException>();
 
             sprint.Status.Should().Be(SprintStatus.Planning);
+
+            _auditServiceMock.Verify(
+             a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+             Times.Never);
+
 
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
@@ -170,17 +205,23 @@ namespace BugTracker.UnitTests.Services
                 r => r.GetActiveSprintsAsync(It.IsAny<Guid>()),
                 Times.Never);
 
+            _auditServiceMock.Verify(
+              a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+              Times.Never);
+
+
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
                 Times.Never);
         }
+
+        // ───────────────────────── CreateAsync ─────────────────────────
 
         [Fact]
         public async Task CreateAsync_WhenProjectDoesNotExist_ShouldThrowNotFoundException()
         {
             // Arrange
             var projectId = Guid.NewGuid();
-
             var dto = new CreateSprintDto
             {
                 Name = "Sprint 1",
@@ -202,6 +243,11 @@ namespace BugTracker.UnitTests.Services
                 r => r.AddAsync(It.IsAny<Sprint>()),
                 Times.Never);
 
+            _auditServiceMock.Verify(
+            a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+
+
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
                 Times.Never);
@@ -212,16 +258,13 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var projectId = Guid.NewGuid();
-
             var project = new Project
             {
                 Id = projectId,
                 Name = "BugTracker",
                 Key = "BUG"
             };
-
             var startDate = DateTime.UtcNow.Date;
-
             var dto = new CreateSprintDto
             {
                 Name = "Sprint 1",
@@ -245,6 +288,11 @@ namespace BugTracker.UnitTests.Services
                 r => r.AddAsync(It.IsAny<Sprint>()),
                 Times.Never);
 
+            _auditServiceMock.Verify(
+             a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+             Times.Never);
+
+
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
                 Times.Never);
@@ -255,17 +303,14 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var projectId = Guid.NewGuid();
-
             var project = new Project
             {
                 Id = projectId,
                 Name = "BugTracker",
                 Key = "BUG"
             };
-
             var startDate = DateTime.UtcNow.Date;
             var endDate = startDate.AddDays(14);
-
             var dto = new CreateSprintDto
             {
                 Name = "Sprint 1",
@@ -279,7 +324,6 @@ namespace BugTracker.UnitTests.Services
                 .ReturnsAsync(project);
 
             Sprint? createdSprint = null;
-
             _sprintRepositoryMock
                 .Setup(r => r.AddAsync(It.IsAny<Sprint>()))
                 .Callback<Sprint>(s => createdSprint = s)
@@ -290,7 +334,6 @@ namespace BugTracker.UnitTests.Services
 
             // Assert
             createdSprint.Should().NotBeNull();
-
             createdSprint!.ProjectId.Should().Be(projectId);
             createdSprint.Name.Should().Be(dto.Name);
             createdSprint.Goal.Should().Be(dto.Goal);
@@ -302,6 +345,14 @@ namespace BugTracker.UnitTests.Services
             result.Name.Should().Be(dto.Name);
             result.Status.Should().Be(SprintStatus.Planning);
 
+            _auditServiceMock.Verify(
+                a => a.LogAsync(It.Is<CreateAuditLogDto>(dto =>
+                    dto.Action == AuditAction.SprintCreated &&
+                    dto.UserId == _currentUserId &&
+                    dto.EntityName == nameof(Sprint)),
+                     It.IsAny<CancellationToken>()),
+                Times.Once);
+
             _sprintRepositoryMock.Verify(
                 r => r.AddAsync(It.IsAny<Sprint>()),
                 Times.Once);
@@ -311,12 +362,13 @@ namespace BugTracker.UnitTests.Services
                 Times.Once);
         }
 
+        // ───────────────────────── UpdateAsync ─────────────────────────
+
         [Fact]
         public async Task UpdateAsync_WhenSprintDoesNotExist_ShouldThrowNotFoundException()
         {
             // Arrange
             var sprintId = Guid.NewGuid();
-
             var dto = new UpdateSprintDto
             {
                 Name = "Sprint Updated",
@@ -334,6 +386,11 @@ namespace BugTracker.UnitTests.Services
             await act.Should()
                 .ThrowAsync<NotFoundException>();
 
+            _auditServiceMock.Verify(
+             a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+             Times.Never);
+
+
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
                 Times.Never);
@@ -346,7 +403,6 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var sprintId = Guid.NewGuid();
-
             var sprint = new Sprint
             {
                 Id = sprintId,
@@ -354,7 +410,6 @@ namespace BugTracker.UnitTests.Services
                 Name = "Sprint 1",
                 Status = status
             };
-
             var dto = new UpdateSprintDto
             {
                 Name = "Sprint Updated",
@@ -372,6 +427,11 @@ namespace BugTracker.UnitTests.Services
             await act.Should()
                 .ThrowAsync<BusinessRuleException>();
 
+            _auditServiceMock.Verify(
+            a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+
+
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
                 Times.Never);
@@ -383,7 +443,6 @@ namespace BugTracker.UnitTests.Services
             // Arrange
             var sprintId = Guid.NewGuid();
             var startDate = DateTime.UtcNow.Date;
-
             var sprint = new Sprint
             {
                 Id = sprintId,
@@ -391,7 +450,6 @@ namespace BugTracker.UnitTests.Services
                 Name = "Sprint 1",
                 Status = SprintStatus.Planning
             };
-
             var dto = new UpdateSprintDto
             {
                 Name = "Sprint Updated",
@@ -413,6 +471,11 @@ namespace BugTracker.UnitTests.Services
 
             sprint.Name.Should().Be("Sprint 1");
 
+            _auditServiceMock.Verify(
+            a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+
+
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
                 Times.Never);
@@ -424,7 +487,6 @@ namespace BugTracker.UnitTests.Services
             // Arrange
             var sprintId = Guid.NewGuid();
             var projectId = Guid.NewGuid();
-
             var sprint = new Sprint
             {
                 Id = sprintId,
@@ -435,10 +497,8 @@ namespace BugTracker.UnitTests.Services
                 EndDate = DateTime.UtcNow.Date.AddDays(7),
                 Status = SprintStatus.Planning
             };
-
             var newStartDate = DateTime.UtcNow.Date.AddDays(1);
             var newEndDate = newStartDate.AddDays(14);
-
             var dto = new UpdateSprintDto
             {
                 Name = "Sprint Updated",
@@ -465,10 +525,20 @@ namespace BugTracker.UnitTests.Services
             result.StartDate.Should().Be(dto.StartDate);
             result.EndDate.Should().Be(dto.EndDate);
 
+            _auditServiceMock.Verify(
+                a => a.LogAsync(It.Is<CreateAuditLogDto>(dto =>
+                    dto.Action == AuditAction.SprintUpdated &&
+                    dto.EntityId == sprintId.ToString() &&
+                    dto.UserId == _currentUserId),
+                    It.IsAny<CancellationToken>()),
+                Times.Once);
+
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
                 Times.Once);
         }
+
+        // ───────────────────────── CompleteAsync ─────────────────────────
 
         [Fact]
         public async Task CompleteAsync_WhenSprintDoesNotExist_ShouldThrowNotFoundException()
@@ -487,6 +557,11 @@ namespace BugTracker.UnitTests.Services
             await act.Should()
                 .ThrowAsync<NotFoundException>();
 
+             _auditServiceMock.Verify(
+              a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+              Times.Never);
+
+
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
                 Times.Never);
@@ -499,7 +574,6 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var sprintId = Guid.NewGuid();
-
             var sprint = new Sprint
             {
                 Id = sprintId,
@@ -519,6 +593,11 @@ namespace BugTracker.UnitTests.Services
             await act.Should()
                 .ThrowAsync<BusinessRuleException>();
 
+            _auditServiceMock.Verify(
+             a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+             Times.Never);
+
+
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
                 Times.Never);
@@ -530,7 +609,6 @@ namespace BugTracker.UnitTests.Services
             // Arrange
             var sprintId = Guid.NewGuid();
             var projectId = Guid.NewGuid();
-
             var sprint = new Sprint
             {
                 Id = sprintId,
@@ -538,7 +616,6 @@ namespace BugTracker.UnitTests.Services
                 Name = "Sprint 1",
                 Status = SprintStatus.Active
             };
-
             var issue1 = new Issue
             {
                 Id = Guid.NewGuid(),
@@ -546,7 +623,6 @@ namespace BugTracker.UnitTests.Services
                 SprintId = sprintId,
                 Status = IssueStatus.Todo
             };
-
             var issue2 = new Issue
             {
                 Id = Guid.NewGuid(),
@@ -558,7 +634,6 @@ namespace BugTracker.UnitTests.Services
             _sprintRepositoryMock
                 .Setup(r => r.GetByIdAsync(sprintId))
                 .ReturnsAsync(sprint);
-
             _issueRepositoryMock
                 .Setup(r => r.GetUnfinishedBySprintIdAsync(sprintId))
                 .ReturnsAsync(new List<Issue> { issue1, issue2 });
@@ -569,9 +644,16 @@ namespace BugTracker.UnitTests.Services
             // Assert
             issue1.SprintId.Should().BeNull();
             issue2.SprintId.Should().BeNull();
-
             sprint.Status.Should().Be(SprintStatus.Completed);
             sprint.CompletedAt.Should().NotBeNull();
+
+            _auditServiceMock.Verify(
+                a => a.LogAsync(It.Is<CreateAuditLogDto>(dto =>
+                    dto.Action == AuditAction.SprintCompleted &&
+                    dto.EntityId == sprintId.ToString() &&
+                    dto.UserId == _currentUserId),
+                     It.IsAny<CancellationToken>()),
+                Times.Once);
 
             _issueRepositoryMock.Verify(
                 r => r.GetUnfinishedBySprintIdAsync(sprintId),
@@ -581,6 +663,8 @@ namespace BugTracker.UnitTests.Services
                 u => u.SaveChangesAsync(),
                 Times.Once);
         }
+
+        // ───────────────────────── DeleteAsync ─────────────────────────
 
         [Fact]
         public async Task DeleteAsync_WhenSprintDoesNotExist_ShouldThrowNotFoundException()
@@ -603,6 +687,11 @@ namespace BugTracker.UnitTests.Services
                 r => r.Delete(It.IsAny<Sprint>()),
                 Times.Never);
 
+            _auditServiceMock.Verify(
+            a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+
+
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
                 Times.Never);
@@ -613,7 +702,6 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var sprintId = Guid.NewGuid();
-
             var sprint = new Sprint
             {
                 Id = sprintId,
@@ -637,6 +725,11 @@ namespace BugTracker.UnitTests.Services
                 r => r.Delete(It.IsAny<Sprint>()),
                 Times.Never);
 
+            _auditServiceMock.Verify(
+            a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+
+
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
                 Times.Never);
@@ -649,7 +742,6 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var sprintId = Guid.NewGuid();
-
             var sprint = new Sprint
             {
                 Id = sprintId,
@@ -670,17 +762,26 @@ namespace BugTracker.UnitTests.Services
                 r => r.Delete(sprint),
                 Times.Once);
 
+            _auditServiceMock.Verify(
+                a => a.LogAsync(It.Is<CreateAuditLogDto>(dto =>
+                    dto.Action == AuditAction.SprintDeleted &&
+                    dto.EntityId == sprintId.ToString() &&
+                    dto.UserId == _currentUserId),
+                     It.IsAny<CancellationToken>()),
+                Times.Once);
+
             _unitOfWorkMock.Verify(
                 u => u.SaveChangesAsync(),
                 Times.Once);
         }
+
+        // ───────────────────────── GetByIdAsync / GetAllByProjectAsync ─────────────────────────
 
         [Fact]
         public async Task GetByIdAsync_WhenSprintExists_ShouldReturnSprintDto()
         {
             // Arrange
             var sprintId = Guid.NewGuid();
-
             var sprint = new Sprint
             {
                 Id = sprintId,
@@ -701,6 +802,11 @@ namespace BugTracker.UnitTests.Services
             result!.Id.Should().Be(sprintId);
             result.Name.Should().Be("Sprint 1");
             result.Status.Should().Be(SprintStatus.Planning);
+
+            _auditServiceMock.Verify(
+            a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+
         }
 
         [Fact]
@@ -718,6 +824,11 @@ namespace BugTracker.UnitTests.Services
 
             // Assert
             result.Should().BeNull();
+
+            _auditServiceMock.Verify(
+             a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+             Times.Never);
+
         }
 
         [Fact]
@@ -725,25 +836,23 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var projectId = Guid.NewGuid();
-
             var sprints = new List<Sprint>
+            {
+                new Sprint
                 {
-                    new Sprint
-                    {
-                        Id = Guid.NewGuid(),
-                        ProjectId = projectId,
-                        Name = "Sprint 1",
-                        Status = SprintStatus.Completed
-                    },
-                
-                    new Sprint
-                    {
-                        Id = Guid.NewGuid(),
-                        ProjectId = projectId,
-                        Name = "Sprint 2",
-                        Status = SprintStatus.Planning
-                    }
-                };
+                    Id = Guid.NewGuid(),
+                    ProjectId = projectId,
+                    Name = "Sprint 1",
+                    Status = SprintStatus.Completed
+                },
+                new Sprint
+                {
+                    Id = Guid.NewGuid(),
+                    ProjectId = projectId,
+                    Name = "Sprint 2",
+                    Status = SprintStatus.Planning
+                }
+            };
 
             _sprintRepositoryMock
                 .Setup(r => r.GetByProjectIdAsync(projectId))
@@ -760,6 +869,11 @@ namespace BugTracker.UnitTests.Services
             _sprintRepositoryMock.Verify(
                 r => r.GetByProjectIdAsync(projectId),
                 Times.Once);
+
+            _auditServiceMock.Verify(
+             a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+             Times.Never);
+
         }
     }
 }

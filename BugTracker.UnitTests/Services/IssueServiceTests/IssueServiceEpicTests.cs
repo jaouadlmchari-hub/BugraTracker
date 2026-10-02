@@ -1,4 +1,5 @@
-﻿using BugTracker.Application.Exceptions;
+﻿using BugTracker.Application.DTOs.Audit;
+using BugTracker.Application.Exceptions;
 using BugTracker.Domain.Entities;
 using BugTracker.Domain.Enums;
 using FluentAssertions;
@@ -8,7 +9,6 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
 {
     public class IssueServiceEpicTests : IssueServiceTestBase
     {
-
         [Fact]
         public async Task MoveToEpicAsync_WhenIssueDoesNotExist_ShouldThrowNotFoundException()
         {
@@ -41,6 +41,10 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
                 Times.Never);
 
             UnitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
+
+            AuditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+                Times.Never);
         }
 
         [Fact]
@@ -86,6 +90,10 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
                 Times.Never);
 
             UnitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
+
+            AuditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+                Times.Never);
         }
 
         [Fact]
@@ -140,6 +148,10 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
                 Times.Never);
 
             UnitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
+
+            AuditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+                Times.Never);
         }
 
         [Fact]
@@ -193,6 +205,10 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
                 Times.Never);
 
             UnitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
+
+            AuditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+                Times.Never);
         }
 
         [Fact]
@@ -234,6 +250,15 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
             issue.EpicId.Should().Be(epicId);
 
             UnitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
+
+            AuditServiceMock.Verify(
+                a => a.LogAsync(
+                    It.Is<CreateAuditLogDto>(dto =>
+                        dto.Action == AuditAction.IssueEpicChanged &&
+                        dto.UserId == CurrentUserId &&
+                        dto.EntityName == nameof(Issue)),
+                    It.IsAny<CancellationToken>()),
+                Times.Once);
         }
 
         [Fact]
@@ -264,6 +289,15 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
             EpicRepositoryMock.Verify(r => r.GetByIdAsync(It.IsAny<Guid>()), Times.Never);
 
             UnitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
+
+            AuditServiceMock.Verify(
+                a => a.LogAsync(
+                    It.Is<CreateAuditLogDto>(dto =>
+                        dto.Action == AuditAction.IssueEpicChanged &&
+                        dto.UserId == CurrentUserId &&
+                        dto.EntityName == nameof(Issue)),
+                    It.IsAny<CancellationToken>()),
+                Times.Once);
         }
     }
 }

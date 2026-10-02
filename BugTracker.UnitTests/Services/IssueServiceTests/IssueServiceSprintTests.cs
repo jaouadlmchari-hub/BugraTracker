@@ -1,13 +1,9 @@
-﻿using BugTracker.Application.Exceptions;
+﻿using BugTracker.Application.DTOs.Audit;
+using BugTracker.Application.Exceptions;
 using BugTracker.Domain.Entities;
 using BugTracker.Domain.Enums;
 using FluentAssertions;
 using Moq;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace BugTracker.UnitTests.Services.IssueServiceTests
 {
@@ -45,6 +41,10 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
                 Times.Never);
 
             UnitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
+
+            AuditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+                Times.Never);
         }
 
         [Fact]
@@ -62,7 +62,6 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
                 Title = "Login bug",
                 SprintId = null
             };
-
 
             IssueRepositoryMock
                 .Setup(r => r.GetByIdWithDetailsAsync(issueId))
@@ -91,6 +90,10 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
                 Times.Never);
 
             UnitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
+
+            AuditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+                Times.Never);
         }
 
         [Fact]
@@ -122,7 +125,6 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
                 .Setup(r => r.GetByIdWithDetailsAsync(issueId))
                 .ReturnsAsync(issue);
 
-
             SprintRepositoryMock
                 .Setup(r => r.GetByIdAsync(sprintId))
                 .ReturnsAsync(sprint);
@@ -146,6 +148,10 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
                 Times.Never);
 
             UnitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
+
+            AuditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+                Times.Never);
         }
 
         [Fact]
@@ -199,6 +205,10 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
                 Times.Never);
 
             UnitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
+
+            AuditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+                Times.Never);
         }
 
         [Fact]
@@ -252,6 +262,10 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
                 Times.Never);
 
             UnitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
+
+            AuditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+                Times.Never);
         }
 
         [Fact]
@@ -295,6 +309,10 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
                 Times.Never);
 
             UnitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
+
+            AuditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+                Times.Never);
         }
 
         [Fact]
@@ -350,8 +368,15 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
                     sprintId.ToString()),
                 Times.Once);
 
-            UnitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
+            UnitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
+
+            AuditServiceMock.Verify(
+                a => a.LogAsync(
+                    It.Is<CreateAuditLogDto>(dto =>
+                        dto.Action == AuditAction.IssueSprintChanged &&
+                        dto.UserId == currentUserId &&
+                        dto.EntityName == nameof(Issue)),
+                    It.IsAny<CancellationToken>()),
                 Times.Once);
         }
 
@@ -409,6 +434,15 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
                 Times.Once);
 
             UnitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
+
+            AuditServiceMock.Verify(
+                a => a.LogAsync(
+                    It.Is<CreateAuditLogDto>(dto =>
+                        dto.Action == AuditAction.IssueSprintChanged &&
+                        dto.UserId == currentUserId &&
+                        dto.EntityName == nameof(Issue)),
+                    It.IsAny<CancellationToken>()),
+                Times.Once);
         }
 
         [Fact]
@@ -466,7 +500,15 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
                 Times.Once);
 
             UnitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
-        }
 
+            AuditServiceMock.Verify(
+                a => a.LogAsync(
+                    It.Is<CreateAuditLogDto>(dto =>
+                        dto.Action == AuditAction.IssueSprintChanged &&
+                        dto.UserId == currentUserId &&
+                        dto.EntityName == nameof(Issue)),
+                    It.IsAny<CancellationToken>()),
+                Times.Once);
+        }
     }
 }

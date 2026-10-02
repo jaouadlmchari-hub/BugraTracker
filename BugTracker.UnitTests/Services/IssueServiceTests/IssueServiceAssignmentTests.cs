@@ -1,9 +1,9 @@
-﻿using BugTracker.Application.Exceptions;
+﻿using BugTracker.Application.DTOs.Audit;
+using BugTracker.Application.Exceptions;
 using BugTracker.Domain.Entities;
 using BugTracker.Domain.Enums;
 using FluentAssertions;
 using Moq;
-
 
 namespace BugTracker.UnitTests.Services.IssueServiceTests
 {
@@ -41,6 +41,10 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
                 Times.Never);
 
             UnitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
+
+            AuditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+                Times.Never);
         }
 
         [Fact]
@@ -86,6 +90,10 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
                 Times.Never);
 
             UnitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
+
+            AuditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+                Times.Never);
         }
 
         [Fact]
@@ -138,6 +146,10 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
                 Times.Never);
 
             UnitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
+
+            AuditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+                Times.Never);
         }
 
         [Fact]
@@ -194,6 +206,15 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
                 Times.Once);
 
             UnitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
+
+            AuditServiceMock.Verify(
+                a => a.LogAsync(
+                    It.Is<CreateAuditLogDto>(dto =>
+                        dto.Action == AuditAction.IssueAssigned &&
+                        dto.UserId == currentUserId &&
+                        dto.EntityName == nameof(Issue)),
+                    It.IsAny<CancellationToken>()),
+                Times.Once);
         }
     }
 }

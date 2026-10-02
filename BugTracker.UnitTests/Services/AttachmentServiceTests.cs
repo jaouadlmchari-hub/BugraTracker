@@ -1,5 +1,7 @@
 ﻿using BugTracker.Application.DTOs.Attachments;
+using BugTracker.Application.DTOs.Audit;
 using BugTracker.Application.Exceptions;
+using BugTracker.Application.Interfaces;
 using BugTracker.Application.Interfaces.Persistence;
 using BugTracker.Application.Interfaces.Repositories;
 using BugTracker.Application.Interfaces.Services;
@@ -9,7 +11,6 @@ using BugTracker.Domain.Enums;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
-using Xunit;
 
 namespace BugTracker.UnitTests.Services
 {
@@ -22,8 +23,12 @@ namespace BugTracker.UnitTests.Services
         private readonly Mock<IFileValidationService> _fileValidationServiceMock;
         private readonly Mock<IFileStorageService> _fileStorageServiceMock;
         private readonly Mock<IActivityLogService> _activityLogServiceMock;
+        private readonly Mock<IAuditService> _auditServiceMock;
         private readonly Mock<ILogger<AttachmentService>> _loggerMock;
         private readonly AttachmentService _sut;
+
+        private readonly Guid _currentUserId = Guid.NewGuid();
+        private const string CurrentUserEmail = "test@example.com";
 
         public AttachmentServiceTests()
         {
@@ -34,10 +39,14 @@ namespace BugTracker.UnitTests.Services
             _fileValidationServiceMock = new Mock<IFileValidationService>();
             _fileStorageServiceMock = new Mock<IFileStorageService>();
             _activityLogServiceMock = new Mock<IActivityLogService>();
+            _auditServiceMock = new Mock<IAuditService>();
             _loggerMock = new Mock<ILogger<AttachmentService>>();
 
             _unitOfWorkMock.SetupGet(u => u.Attachments).Returns(_attachmentRepositoryMock.Object);
             _unitOfWorkMock.SetupGet(u => u.Issues).Returns(_issueRepositoryMock.Object);
+
+            _currentUserServiceMock.SetupGet(c => c.UserId).Returns(_currentUserId);
+            _currentUserServiceMock.SetupGet(c => c.Email).Returns(CurrentUserEmail);
 
             _sut = new AttachmentService(
                 _unitOfWorkMock.Object,
@@ -45,7 +54,8 @@ namespace BugTracker.UnitTests.Services
                 _fileValidationServiceMock.Object,
                 _fileStorageServiceMock.Object,
                 _loggerMock.Object,
-                _activityLogServiceMock.Object);
+                _activityLogServiceMock.Object,
+                _auditServiceMock.Object);
         }
 
         // ============================================================
@@ -104,6 +114,10 @@ namespace BugTracker.UnitTests.Services
                     attachment.StorageKey,
                     TimeSpan.FromHours(1)),
                 Times.Once);
+
+            _auditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+                Times.Never);
         }
 
         [Fact]
@@ -126,6 +140,10 @@ namespace BugTracker.UnitTests.Services
                 s => s.GenerateDownloadUrlAsync(
                     It.IsAny<string>(),
                     It.IsAny<TimeSpan>()),
+                Times.Never);
+
+            _auditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
                 Times.Never);
         }
 
@@ -151,6 +169,10 @@ namespace BugTracker.UnitTests.Services
 
             _attachmentRepositoryMock.Verify(
                 r => r.GetByIssueIdAsync(It.IsAny<Guid>()),
+                Times.Never);
+
+            _auditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
                 Times.Never);
         }
 
@@ -189,11 +211,7 @@ namespace BugTracker.UnitTests.Services
                 SizeBytes = 2000
             };
 
-            var attachments = new List<Attachment>
-            {
-                attachment1,
-                attachment2
-            };
+            var attachments = new List<Attachment> { attachment1, attachment2 };
 
             _issueRepositoryMock
                 .Setup(r => r.GetByIdAsync(issueId))
@@ -204,15 +222,11 @@ namespace BugTracker.UnitTests.Services
                 .ReturnsAsync(attachments);
 
             _fileStorageServiceMock
-                .Setup(s => s.GenerateDownloadUrlAsync(
-                    "storage-1.png",
-                    TimeSpan.FromHours(1)))
+                .Setup(s => s.GenerateDownloadUrlAsync("storage-1.png", TimeSpan.FromHours(1)))
                 .ReturnsAsync("url-1");
 
             _fileStorageServiceMock
-                .Setup(s => s.GenerateDownloadUrlAsync(
-                    "storage-2.pdf",
-                    TimeSpan.FromHours(1)))
+                .Setup(s => s.GenerateDownloadUrlAsync("storage-2.pdf", TimeSpan.FromHours(1)))
                 .ReturnsAsync("url-2");
 
             // Act
@@ -220,7 +234,6 @@ namespace BugTracker.UnitTests.Services
 
             // Assert
             result.Should().HaveCount(2);
-
             result.Should().Contain(a => a.Filename == "bug1.png");
             result.Should().Contain(a => a.Filename == "bug2.pdf");
 
@@ -229,10 +242,12 @@ namespace BugTracker.UnitTests.Services
                 Times.Once);
 
             _fileStorageServiceMock.Verify(
-                s => s.GenerateDownloadUrlAsync(
-                    It.IsAny<string>(),
-                    TimeSpan.FromHours(1)),
+                s => s.GenerateDownloadUrlAsync(It.IsAny<string>(), TimeSpan.FromHours(1)),
                 Times.Exactly(2));
+
+            _auditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+                Times.Never);
         }
 
         // ============================================================
@@ -263,26 +278,22 @@ namespace BugTracker.UnitTests.Services
             await act.Should().ThrowAsync<NotFoundException>();
 
             _fileValidationServiceMock.Verify(
-                v => v.ValidateAsync(
-                    It.IsAny<Stream>(),
-                    It.IsAny<string>(),
-                    It.IsAny<string>()),
+                v => v.ValidateAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<string>()),
                 Times.Never);
 
             _fileStorageServiceMock.Verify(
-                s => s.UploadAsync(
-                    It.IsAny<Stream>(),
-                    It.IsAny<string>(),
-                    It.IsAny<string>()),
+                s => s.UploadAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<string>()),
                 Times.Never);
 
             _attachmentRepositoryMock.Verify(
                 r => r.AddAsync(It.IsAny<Attachment>()),
                 Times.Never);
 
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
+            _auditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
                 Times.Never);
+
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -321,23 +332,11 @@ namespace BugTracker.UnitTests.Services
                 r => r.CountByIssueIdAsync(It.IsAny<Guid>()),
                 Times.Never);
 
-            _fileValidationServiceMock.Verify(
-                v => v.ValidateAsync(
-                    It.IsAny<Stream>(),
-                    It.IsAny<string>(),
-                    It.IsAny<string>()),
+            _auditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
                 Times.Never);
 
-            _fileStorageServiceMock.Verify(
-                s => s.UploadAsync(
-                    It.IsAny<Stream>(),
-                    It.IsAny<string>(),
-                    It.IsAny<string>()),
-                Times.Never);
-
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -377,26 +376,14 @@ namespace BugTracker.UnitTests.Services
                 .WithMessage("MAX_ATTACHMENTS_REACHED");
 
             _fileValidationServiceMock.Verify(
-                v => v.ValidateAsync(
-                    It.IsAny<Stream>(),
-                    It.IsAny<string>(),
-                    It.IsAny<string>()),
+                v => v.ValidateAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<string>()),
                 Times.Never);
 
-            _fileStorageServiceMock.Verify(
-                s => s.UploadAsync(
-                    It.IsAny<Stream>(),
-                    It.IsAny<string>(),
-                    It.IsAny<string>()),
+            _auditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
                 Times.Never);
 
-            _attachmentRepositoryMock.Verify(
-                r => r.AddAsync(It.IsAny<Attachment>()),
-                Times.Never);
-
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -430,12 +417,8 @@ namespace BugTracker.UnitTests.Services
                 .ReturnsAsync(5);
 
             _fileValidationServiceMock
-                .Setup(v => v.ValidateAsync(
-                    stream,
-                    dto.FileName,
-                    dto.ContentType))
-                .ThrowsAsync(
-                    new BusinessRuleException("Fichier invalide."));
+                .Setup(v => v.ValidateAsync(stream, dto.FileName, dto.ContentType))
+                .ThrowsAsync(new BusinessRuleException("Fichier invalide."));
 
             // Act
             Func<Task> act = () => _sut.UploadAsync(issueId, dto);
@@ -444,29 +427,18 @@ namespace BugTracker.UnitTests.Services
             await act.Should().ThrowAsync<BusinessRuleException>();
 
             _fileStorageServiceMock.Verify(
-                s => s.UploadAsync(
-                    It.IsAny<Stream>(),
-                    It.IsAny<string>(),
-                    It.IsAny<string>()),
+                s => s.UploadAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<string>()),
                 Times.Never);
 
             _attachmentRepositoryMock.Verify(
                 r => r.AddAsync(It.IsAny<Attachment>()),
                 Times.Never);
 
-            _activityLogServiceMock.Verify(
-                a => a.LogAsync(
-                    It.IsAny<Guid>(),
-                    It.IsAny<Guid>(),
-                    It.IsAny<ActivityAction>(),
-                    It.IsAny<string?>(),
-                    It.IsAny<string?>(),
-                    It.IsAny<string?>()),
+            _auditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
                 Times.Never);
 
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -500,17 +472,11 @@ namespace BugTracker.UnitTests.Services
                 .ReturnsAsync(2);
 
             _fileValidationServiceMock
-                .Setup(v => v.ValidateAsync(
-                    stream,
-                    dto.FileName,
-                    dto.ContentType))
+                .Setup(v => v.ValidateAsync(stream, dto.FileName, dto.ContentType))
                 .Returns(Task.CompletedTask);
 
             _fileStorageServiceMock
-                .Setup(s => s.UploadAsync(
-                    stream,
-                    It.IsAny<string>(),
-                    dto.ContentType))
+                .Setup(s => s.UploadAsync(stream, It.IsAny<string>(), dto.ContentType))
                 .ThrowsAsync(new Exception("S3 unavailable"));
 
             // Act
@@ -523,19 +489,11 @@ namespace BugTracker.UnitTests.Services
                 r => r.AddAsync(It.IsAny<Attachment>()),
                 Times.Never);
 
-            _activityLogServiceMock.Verify(
-                a => a.LogAsync(
-                    It.IsAny<Guid>(),
-                    It.IsAny<Guid>(),
-                    It.IsAny<ActivityAction>(),
-                    It.IsAny<string?>(),
-                    It.IsAny<string?>(),
-                    It.IsAny<string?>()),
+            _auditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
                 Times.Never);
 
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -575,10 +533,7 @@ namespace BugTracker.UnitTests.Services
                 .ReturnsAsync(5);
 
             _fileValidationServiceMock
-                .Setup(v => v.ValidateAsync(
-                    stream,
-                    dto.FileName,
-                    dto.ContentType))
+                .Setup(v => v.ValidateAsync(stream, dto.FileName, dto.ContentType))
                 .Callback<Stream, string, string>((file, _, _) =>
                 {
                     file.Position = file.Length;
@@ -589,10 +544,7 @@ namespace BugTracker.UnitTests.Services
             long? positionAtUpload = null;
 
             _fileStorageServiceMock
-                .Setup(s => s.UploadAsync(
-                    stream,
-                    It.IsAny<string>(),
-                    dto.ContentType))
+                .Setup(s => s.UploadAsync(stream, It.IsAny<string>(), dto.ContentType))
                 .Callback<Stream, string, string>((file, key, _) =>
                 {
                     positionAtUpload = file.Position;
@@ -604,18 +556,12 @@ namespace BugTracker.UnitTests.Services
 
             _attachmentRepositoryMock
                 .Setup(r => r.AddAsync(It.IsAny<Attachment>()))
-                .Callback<Attachment>(attachment =>
-                {
-                    createdAttachment = attachment;
-                })
+                .Callback<Attachment>(attachment => createdAttachment = attachment)
                 .Returns(Task.CompletedTask);
 
             _fileStorageServiceMock
-                .Setup(s => s.GenerateDownloadUrlAsync(
-                    It.IsAny<string>(),
-                    TimeSpan.FromHours(1)))
-                .ReturnsAsync(
-                    "http://localhost/download/screenshot");
+                .Setup(s => s.GenerateDownloadUrlAsync(It.IsAny<string>(), TimeSpan.FromHours(1)))
+                .ReturnsAsync("http://localhost/download/screenshot");
 
             // Act
             var result = await _sut.UploadAsync(issueId, dto);
@@ -632,15 +578,9 @@ namespace BugTracker.UnitTests.Services
             createdAttachment.StorageKey.Should().Be(capturedStorageKey);
 
             capturedStorageKey.Should().EndWith(".png");
+            Guid.TryParse(Path.GetFileNameWithoutExtension(capturedStorageKey), out _)
+                .Should().BeTrue();
 
-            Guid.TryParse(
-                Path.GetFileNameWithoutExtension(capturedStorageKey),
-                out _)
-                .Should()
-                .BeTrue();
-
-            // ValidateAsync a déplacé Position à la fin.
-            // AttachmentService doit la remettre à 0 avant UploadAsync.
             positionAtUpload.Should().Be(0);
 
             result.IssueId.Should().Be(issueId);
@@ -648,17 +588,11 @@ namespace BugTracker.UnitTests.Services
             result.Filename.Should().Be(dto.FileName);
 
             _fileValidationServiceMock.Verify(
-                v => v.ValidateAsync(
-                    stream,
-                    dto.FileName,
-                    dto.ContentType),
+                v => v.ValidateAsync(stream, dto.FileName, dto.ContentType),
                 Times.Once);
 
             _fileStorageServiceMock.Verify(
-                s => s.UploadAsync(
-                    stream,
-                    capturedStorageKey!,
-                    dto.ContentType),
+                s => s.UploadAsync(stream, capturedStorageKey!, dto.ContentType),
                 Times.Once);
 
             _attachmentRepositoryMock.Verify(
@@ -675,14 +609,19 @@ namespace BugTracker.UnitTests.Services
                     null),
                 Times.Once);
 
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
+            _auditServiceMock.Verify(
+                a => a.LogAsync(
+                    It.Is<CreateAuditLogDto>(dto =>
+                        dto.Action == AuditAction.AttachmentUploaded &&
+                        dto.UserId == currentUserId &&
+                        dto.EntityName == nameof(Attachment)),
+                    It.IsAny<CancellationToken>()),
                 Times.Once);
 
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
+
             _fileStorageServiceMock.Verify(
-                s => s.GenerateDownloadUrlAsync(
-                    capturedStorageKey!,
-                    TimeSpan.FromHours(1)),
+                s => s.GenerateDownloadUrlAsync(capturedStorageKey!, TimeSpan.FromHours(1)),
                 Times.Once);
         }
 
@@ -707,9 +646,11 @@ namespace BugTracker.UnitTests.Services
             await act.Should().ThrowAsync<NotFoundException>();
 
             _fileStorageServiceMock.Verify(
-                s => s.GenerateDownloadUrlAsync(
-                    It.IsAny<string>(),
-                    It.IsAny<TimeSpan>()),
+                s => s.GenerateDownloadUrlAsync(It.IsAny<string>(), It.IsAny<TimeSpan>()),
+                Times.Never);
+
+            _auditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
                 Times.Never);
         }
 
@@ -730,17 +671,14 @@ namespace BugTracker.UnitTests.Services
                 SizeBytes = 1024
             };
 
-            const string expectedUrl =
-                "http://localhost/presigned-url";
+            const string expectedUrl = "http://localhost/presigned-url";
 
             _attachmentRepositoryMock
                 .Setup(r => r.GetByIdAsync(attachmentId))
                 .ReturnsAsync(attachment);
 
             _fileStorageServiceMock
-                .Setup(s => s.GenerateDownloadUrlAsync(
-                    attachment.StorageKey,
-                    TimeSpan.FromHours(1)))
+                .Setup(s => s.GenerateDownloadUrlAsync(attachment.StorageKey, TimeSpan.FromHours(1)))
                 .ReturnsAsync(expectedUrl);
 
             // Act
@@ -750,10 +688,12 @@ namespace BugTracker.UnitTests.Services
             result.Should().Be(expectedUrl);
 
             _fileStorageServiceMock.Verify(
-                s => s.GenerateDownloadUrlAsync(
-                    attachment.StorageKey,
-                    TimeSpan.FromHours(1)),
+                s => s.GenerateDownloadUrlAsync(attachment.StorageKey, TimeSpan.FromHours(1)),
                 Times.Once);
+
+            _auditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+                Times.Never);
         }
 
         // ============================================================
@@ -790,13 +730,15 @@ namespace BugTracker.UnitTests.Services
                     It.IsAny<string?>()),
                 Times.Never);
 
+            _auditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+                Times.Never);
+
             _fileStorageServiceMock.Verify(
                 s => s.DeleteAsync(It.IsAny<string>()),
                 Times.Never);
 
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -848,9 +790,16 @@ namespace BugTracker.UnitTests.Services
                     null),
                 Times.Once);
 
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
+            _auditServiceMock.Verify(
+                a => a.LogAsync(
+                    It.Is<CreateAuditLogDto>(dto =>
+                        dto.Action == AuditAction.AttachmentDeleted &&
+                        dto.UserId == currentUserId &&
+                        dto.EntityName == nameof(Attachment)),
+                    It.IsAny<CancellationToken>()),
                 Times.Once);
+
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
 
             _fileStorageServiceMock.Verify(
                 s => s.DeleteAsync(attachment.StorageKey),
@@ -908,9 +857,16 @@ namespace BugTracker.UnitTests.Services
                     null),
                 Times.Once);
 
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
+            _auditServiceMock.Verify(
+                a => a.LogAsync(
+                    It.Is<CreateAuditLogDto>(dto =>
+                        dto.Action == AuditAction.AttachmentDeleted &&
+                        dto.UserId == currentUserId &&
+                        dto.EntityName == nameof(Attachment)),
+                    It.IsAny<CancellationToken>()),
                 Times.Once);
+
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
 
             _fileStorageServiceMock.Verify(
                 s => s.DeleteAsync(attachment.StorageKey),

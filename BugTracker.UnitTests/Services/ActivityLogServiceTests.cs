@@ -5,8 +5,8 @@ using BugTracker.Application.Services;
 using BugTracker.Domain.Entities;
 using BugTracker.Domain.Enums;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Moq;
-using Xunit;
 
 namespace BugTracker.UnitTests.Services
 {
@@ -15,6 +15,7 @@ namespace BugTracker.UnitTests.Services
         private readonly Mock<IUnitOfWork> _unitOfWorkMock;
         private readonly Mock<IActivityLogRepository> _activityLogRepositoryMock;
         private readonly Mock<IIssueRepository> _issueRepositoryMock;
+        private readonly Mock<ILogger<ActivityLogService>> _loggerMock;
         private readonly ActivityLogService _sut;
 
         public ActivityLogServiceTests()
@@ -22,6 +23,7 @@ namespace BugTracker.UnitTests.Services
             _unitOfWorkMock = new Mock<IUnitOfWork>();
             _activityLogRepositoryMock = new Mock<IActivityLogRepository>();
             _issueRepositoryMock = new Mock<IIssueRepository>();
+            _loggerMock = new Mock<ILogger<ActivityLogService>>();
 
             _unitOfWorkMock
                 .SetupGet(u => u.ActivityLogs)
@@ -31,9 +33,10 @@ namespace BugTracker.UnitTests.Services
                 .SetupGet(u => u.Issues)
                 .Returns(_issueRepositoryMock.Object);
 
-            _sut = new ActivityLogService(_unitOfWorkMock.Object);
+            _sut = new ActivityLogService(
+                _unitOfWorkMock.Object,
+                _loggerMock.Object);
         }
-
 
         [Fact]
         public async Task GetByIssueAsync_WhenIssueExists_ShouldReturnActivityLogs()
@@ -57,29 +60,29 @@ namespace BugTracker.UnitTests.Services
             };
 
             var logs = new List<ActivityLog>
+            {
+                new ActivityLog
                 {
-                    new ActivityLog
-                    {
-                        Id = Guid.NewGuid(),
-                        IssueId = issueId,
-                        UserId = userId,
-                        User = user,
-                        Action = ActivityAction.StatusChanged,
-                        Field = "Status",
-                        FromValue = IssueStatus.Todo.ToString(),
-                        ToValue = IssueStatus.InProgress.ToString(),
-                        CreatedAt = DateTime.UtcNow
-                    },
-                    new ActivityLog
-                    {
-                        Id = Guid.NewGuid(),
-                        IssueId = issueId,
-                        UserId = userId,
-                        User = user,
-                        Action = ActivityAction.Commented,
-                        CreatedAt = DateTime.UtcNow
-                    }
-                };
+                    Id = Guid.NewGuid(),
+                    IssueId = issueId,
+                    UserId = userId,
+                    User = user,
+                    Action = ActivityAction.StatusChanged,
+                    Field = "Status",
+                    FromValue = IssueStatus.Todo.ToString(),
+                    ToValue = IssueStatus.InProgress.ToString(),
+                    CreatedAt = DateTime.UtcNow
+                },
+                new ActivityLog
+                {
+                    Id = Guid.NewGuid(),
+                    IssueId = issueId,
+                    UserId = userId,
+                    User = user,
+                    Action = ActivityAction.Commented,
+                    CreatedAt = DateTime.UtcNow
+                }
+            };
 
             _issueRepositoryMock
                 .Setup(r => r.GetByIdAsync(issueId))

@@ -1,12 +1,17 @@
-﻿using BugTracker.Application.DTOs.Epics;
+﻿using BugTracker.Application.DTOs.Audit;
+using BugTracker.Application.DTOs.Epics;
 using BugTracker.Application.Exceptions;
+using BugTracker.Application.Interfaces;
 using BugTracker.Application.Interfaces.Persistence;
 using BugTracker.Application.Interfaces.Repositories;
+using BugTracker.Application.Interfaces.Services;
 using BugTracker.Application.Services;
 using BugTracker.Domain.Entities;
 using BugTracker.Domain.Enums;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Moq;
+using Xunit;
 
 namespace BugTracker.UnitTests.Services
 {
@@ -15,6 +20,9 @@ namespace BugTracker.UnitTests.Services
         private readonly Mock<IUnitOfWork> _unitOfWorkMock;
         private readonly Mock<IEpicRepository> _epicRepositoryMock;
         private readonly Mock<IProjectRepository> _projectRepositoryMock;
+        private readonly Mock<ICurrentUserService> _currentUserServiceMock;
+        private readonly Mock<IAuditService> _auditServiceMock;
+        private readonly Mock<ILogger<EpicService>> _loggerMock;
         private readonly EpicService _sut;
 
         public EpicServiceTests()
@@ -22,6 +30,9 @@ namespace BugTracker.UnitTests.Services
             _unitOfWorkMock = new Mock<IUnitOfWork>();
             _epicRepositoryMock = new Mock<IEpicRepository>();
             _projectRepositoryMock = new Mock<IProjectRepository>();
+            _currentUserServiceMock = new Mock<ICurrentUserService>();
+            _auditServiceMock = new Mock<IAuditService>();
+            _loggerMock = new Mock<ILogger<EpicService>>();
 
             _unitOfWorkMock
                 .SetupGet(u => u.Epics)
@@ -31,15 +42,20 @@ namespace BugTracker.UnitTests.Services
                 .SetupGet(u => u.Projects)
                 .Returns(_projectRepositoryMock.Object);
 
-            _sut = new EpicService(_unitOfWorkMock.Object);
+            _sut = new EpicService(
+                _unitOfWorkMock.Object,
+                _currentUserServiceMock.Object,
+                _auditServiceMock.Object,
+                _loggerMock.Object);
         }
+
+        // ==================== CREATE ====================
 
         [Fact]
         public async Task CreateAsync_WhenProjectDoesNotExist_ShouldThrowNotFoundException()
         {
             // Arrange
             var projectId = Guid.NewGuid();
-
             var dto = new CreateEpicDto
             {
                 Title = "Authentication",
@@ -55,16 +71,11 @@ namespace BugTracker.UnitTests.Services
             Func<Task> act = () => _sut.CreateAsync(projectId, dto);
 
             // Assert
-            await act.Should()
-                .ThrowAsync<NotFoundException>();
+            await act.Should().ThrowAsync<NotFoundException>();
 
-            _epicRepositoryMock.Verify(
-                r => r.AddAsync(It.IsAny<Epic>()),
-                Times.Never);
-
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _epicRepositoryMock.Verify(r => r.AddAsync(It.IsAny<Epic>()), Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -72,6 +83,8 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var projectId = Guid.NewGuid();
+            var currentUserId = Guid.NewGuid();
+            const string currentUserEmail = "user@test.com";
 
             var dto = new CreateEpicDto
             {
@@ -79,6 +92,14 @@ namespace BugTracker.UnitTests.Services
                 Description = "Authentication and authorization",
                 ColorCode = "#3B82F6"
             };
+
+            _currentUserServiceMock
+                .SetupGet(c => c.UserId)
+                .Returns(currentUserId);
+
+            _currentUserServiceMock
+                .SetupGet(c => c.Email)
+                .Returns(currentUserEmail);
 
             _projectRepositoryMock
                 .Setup(r => r.ExistsAsync(projectId))
@@ -96,7 +117,6 @@ namespace BugTracker.UnitTests.Services
 
             // Assert
             createdEpic.Should().NotBeNull();
-
             createdEpic!.ProjectId.Should().Be(projectId);
             createdEpic.Title.Should().Be(dto.Title);
             createdEpic.Description.Should().Be(dto.Description);
@@ -107,21 +127,30 @@ namespace BugTracker.UnitTests.Services
             result.Title.Should().Be(dto.Title);
             result.Status.Should().Be(EpicStatus.Active);
 
-            _epicRepositoryMock.Verify(
-                r => r.AddAsync(It.IsAny<Epic>()),
+            _epicRepositoryMock.Verify(r => r.AddAsync(It.IsAny<Epic>()), Times.Once);
+
+            _auditServiceMock.Verify(a => a.LogAsync(
+                It.Is<CreateAuditLogDto>(d =>
+                    d.UserId == currentUserId &&
+                    d.UserEmail == currentUserEmail &&
+                    d.Action == AuditAction.EpicCreated &&
+                    d.EntityName == nameof(Epic) &&
+                    d.EntityId == createdEpic.Id.ToString() &&
+                    d.Details != null &&
+                    d.Details.Contains("Création de l'Epic")),
+                It.IsAny<CancellationToken>()),
                 Times.Once);
 
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Once);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
         }
+
+        // ==================== UPDATE ====================
 
         [Fact]
         public async Task UpdateAsync_WhenEpicDoesNotExist_ShouldThrowNotFoundException()
         {
             // Arrange
             var epicId = Guid.NewGuid();
-
             var dto = new UpdateEpicDto
             {
                 Title = "Updated Epic",
@@ -137,12 +166,10 @@ namespace BugTracker.UnitTests.Services
             Func<Task> act = () => _sut.UpdateAsync(epicId, dto);
 
             // Assert
-            await act.Should()
-                .ThrowAsync<NotFoundException>();
+            await act.Should().ThrowAsync<NotFoundException>();
 
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -150,7 +177,6 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var epicId = Guid.NewGuid();
-
             var epic = new Epic
             {
                 Id = epicId,
@@ -174,14 +200,12 @@ namespace BugTracker.UnitTests.Services
             Func<Task> act = () => _sut.UpdateAsync(epicId, dto);
 
             // Assert
-            await act.Should()
-                .ThrowAsync<BusinessRuleException>();
+            await act.Should().ThrowAsync<BusinessRuleException>();
 
             epic.Title.Should().Be("Old Epic");
 
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -190,6 +214,8 @@ namespace BugTracker.UnitTests.Services
             // Arrange
             var epicId = Guid.NewGuid();
             var projectId = Guid.NewGuid();
+            var currentUserId = Guid.NewGuid();
+            const string currentUserEmail = "user@test.com";
 
             var epic = new Epic
             {
@@ -208,6 +234,14 @@ namespace BugTracker.UnitTests.Services
                 ColorCode = "#FF5733"
             };
 
+            _currentUserServiceMock
+                .SetupGet(c => c.UserId)
+                .Returns(currentUserId);
+
+            _currentUserServiceMock
+                .SetupGet(c => c.Email)
+                .Returns(currentUserEmail);
+
             _epicRepositoryMock
                 .Setup(r => r.GetByIdAsync(epicId))
                 .ReturnsAsync(epic);
@@ -224,10 +258,22 @@ namespace BugTracker.UnitTests.Services
             result.Description.Should().Be(dto.Description);
             result.ColorCode.Should().Be(dto.ColorCode);
 
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
+            _auditServiceMock.Verify(a => a.LogAsync(
+                It.Is<CreateAuditLogDto>(d =>
+                    d.UserId == currentUserId &&
+                    d.UserEmail == currentUserEmail &&
+                    d.Action == AuditAction.EpicUpdated &&
+                    d.EntityName == nameof(Epic) &&
+                    d.EntityId == epicId.ToString() &&
+                    d.Details != null &&
+                    d.Details.Contains("Mise à jour de l'Epic")),
+                It.IsAny<CancellationToken>()),
                 Times.Once);
+
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
         }
+
+        // ==================== CHANGE STATUS ====================
 
         [Fact]
         public async Task ChangeStatusAsync_WhenEpicDoesNotExist_ShouldThrowNotFoundException()
@@ -243,12 +289,10 @@ namespace BugTracker.UnitTests.Services
             Func<Task> act = () => _sut.ChangeStatusAsync(epicId, EpicStatus.Archived);
 
             // Assert
-            await act.Should()
-                .ThrowAsync<NotFoundException>();
+            await act.Should().ThrowAsync<NotFoundException>();
 
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -256,7 +300,6 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var epicId = Guid.NewGuid();
-
             var epic = new Epic
             {
                 Id = epicId,
@@ -275,14 +318,12 @@ namespace BugTracker.UnitTests.Services
             Func<Task> act = () => _sut.ChangeStatusAsync(epicId, invalidStatus);
 
             // Assert
-            await act.Should()
-                .ThrowAsync<BusinessRuleException>();
+            await act.Should().ThrowAsync<BusinessRuleException>();
 
             epic.Status.Should().Be(EpicStatus.Active);
 
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -290,6 +331,8 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var epicId = Guid.NewGuid();
+            var currentUserId = Guid.NewGuid();
+            const string currentUserEmail = "user@test.com";
 
             var epic = new Epic
             {
@@ -298,6 +341,14 @@ namespace BugTracker.UnitTests.Services
                 Title = "Epic 1",
                 Status = EpicStatus.Active
             };
+
+            _currentUserServiceMock
+                .SetupGet(c => c.UserId)
+                .Returns(currentUserId);
+
+            _currentUserServiceMock
+                .SetupGet(c => c.Email)
+                .Returns(currentUserEmail);
 
             _epicRepositoryMock
                 .Setup(r => r.GetByIdAsync(epicId))
@@ -309,10 +360,23 @@ namespace BugTracker.UnitTests.Services
             // Assert
             epic.Status.Should().Be(EpicStatus.Archived);
 
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
+            // Note : dans le service, Action = AuditAction.EpicUpdated pour le changement de statut
+            _auditServiceMock.Verify(a => a.LogAsync(
+                It.Is<CreateAuditLogDto>(d =>
+                    d.UserId == currentUserId &&
+                    d.UserEmail == currentUserEmail &&
+                    d.Action == AuditAction.EpicUpdated &&
+                    d.EntityName == nameof(Epic) &&
+                    d.EntityId == epicId.ToString() &&
+                    d.Details != null &&
+                    d.Details.Contains("Changement du statut")),
+                It.IsAny<CancellationToken>()),
                 Times.Once);
+
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
         }
+
+        // ==================== DELETE ====================
 
         [Fact]
         public async Task DeleteAsync_WhenEpicDoesNotExist_ShouldThrowNotFoundException()
@@ -328,16 +392,11 @@ namespace BugTracker.UnitTests.Services
             Func<Task> act = () => _sut.DeleteAsync(epicId);
 
             // Assert
-            await act.Should()
-                .ThrowAsync<NotFoundException>();
+            await act.Should().ThrowAsync<NotFoundException>();
 
-            _epicRepositoryMock.Verify(
-                r => r.Delete(It.IsAny<Epic>()),
-                Times.Never);
-
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _epicRepositoryMock.Verify(r => r.Delete(It.IsAny<Epic>()), Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -346,6 +405,8 @@ namespace BugTracker.UnitTests.Services
             // Arrange
             var epicId = Guid.NewGuid();
             var projectId = Guid.NewGuid();
+            var currentUserId = Guid.NewGuid();
+            const string currentUserEmail = "user@test.com";
 
             var issue1 = new Issue
             {
@@ -367,12 +428,16 @@ namespace BugTracker.UnitTests.Services
                 ProjectId = projectId,
                 Title = "Epic 1",
                 Status = EpicStatus.Active,
-                Issues = new List<Issue>
-        {
-            issue1,
-            issue2
-        }
+                Issues = new List<Issue> { issue1, issue2 }
             };
+
+            _currentUserServiceMock
+                .SetupGet(c => c.UserId)
+                .Returns(currentUserId);
+
+            _currentUserServiceMock
+                .SetupGet(c => c.Email)
+                .Returns(currentUserEmail);
 
             _epicRepositoryMock
                 .Setup(r => r.GetByIdWithDetailsAsync(epicId))
@@ -385,21 +450,30 @@ namespace BugTracker.UnitTests.Services
             issue1.EpicId.Should().BeNull();
             issue2.EpicId.Should().BeNull();
 
-            _epicRepositoryMock.Verify(
-                r => r.Delete(epic),
+            _epicRepositoryMock.Verify(r => r.Delete(epic), Times.Once);
+
+            _auditServiceMock.Verify(a => a.LogAsync(
+                It.Is<CreateAuditLogDto>(d =>
+                    d.UserId == currentUserId &&
+                    d.UserEmail == currentUserEmail &&
+                    d.Action == AuditAction.EpicDeleted &&
+                    d.EntityName == nameof(Epic) &&
+                    d.EntityId == epicId.ToString() &&
+                    d.Details != null &&
+                    d.Details.Contains("Suppression de l'Epic")),
+                It.IsAny<CancellationToken>()),
                 Times.Once);
 
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Once);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
         }
+
+        // ==================== GETTERS ====================
 
         [Fact]
         public async Task GetByIdAsync_WhenEpicExists_ShouldReturnEpicDto()
         {
             // Arrange
             var epicId = Guid.NewGuid();
-
             var epic = new Epic
             {
                 Id = epicId,
@@ -444,7 +518,6 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var epicId = Guid.NewGuid();
-
             var epic = new Epic
             {
                 Id = epicId,
@@ -470,14 +543,17 @@ namespace BugTracker.UnitTests.Services
         [Fact]
         public async Task GetByIdWithDetailsAsync_WhenEpicDoesNotExist_ShouldReturnNull()
         {
+            // Arrange
             var epicId = Guid.NewGuid();
 
             _epicRepositoryMock
                 .Setup(r => r.GetByIdWithDetailsAsync(epicId))
                 .ReturnsAsync((Epic?)null);
 
+            // Act
             var result = await _sut.GetByIdWithDetailsAsync(epicId);
 
+            // Assert
             result.Should().BeNull();
         }
 
@@ -495,12 +571,9 @@ namespace BugTracker.UnitTests.Services
             Func<Task> act = () => _sut.GetAllByProjectAsync(projectId);
 
             // Assert
-            await act.Should()
-                .ThrowAsync<NotFoundException>();
+            await act.Should().ThrowAsync<NotFoundException>();
 
-            _epicRepositoryMock.Verify(
-                r => r.GetByProjectIdAsync(projectId),
-                Times.Never);
+            _epicRepositoryMock.Verify(r => r.GetByProjectIdAsync(projectId), Times.Never);
         }
 
         [Fact]
@@ -517,22 +590,22 @@ namespace BugTracker.UnitTests.Services
             };
 
             var epics = new List<Epic>
-               {
-                   new Epic
-                   {
-                       Id = Guid.NewGuid(),
-                       ProjectId = projectId,
-                       Title = "Epic 1",
-                       Status = EpicStatus.Active
-                   },
-                   new Epic
-                   {
-                       Id = Guid.NewGuid(),
-                       ProjectId = projectId,
-                       Title = "Epic 2",
-                       Status = EpicStatus.Archived
-                   }
-               };
+            {
+                new Epic
+                {
+                    Id = Guid.NewGuid(),
+                    ProjectId = projectId,
+                    Title = "Epic 1",
+                    Status = EpicStatus.Active
+                },
+                new Epic
+                {
+                    Id = Guid.NewGuid(),
+                    ProjectId = projectId,
+                    Title = "Epic 2",
+                    Status = EpicStatus.Archived
+                }
+            };
 
             _projectRepositoryMock
                 .Setup(r => r.GetByIdAsync(projectId))
@@ -565,12 +638,9 @@ namespace BugTracker.UnitTests.Services
             Func<Task> act = () => _sut.GetActiveByProjectAsync(projectId);
 
             // Assert
-            await act.Should()
-                .ThrowAsync<NotFoundException>();
+            await act.Should().ThrowAsync<NotFoundException>();
 
-            _epicRepositoryMock.Verify(
-                r => r.GetActiveEpicsAsync(projectId),
-                Times.Never);
+            _epicRepositoryMock.Verify(r => r.GetActiveEpicsAsync(projectId), Times.Never);
         }
 
         [Fact]
@@ -587,22 +657,22 @@ namespace BugTracker.UnitTests.Services
             };
 
             var activeEpics = new List<Epic>
-               {
-                   new Epic
-                   {
-                       Id = Guid.NewGuid(),
-                       ProjectId = projectId,
-                       Title = "Authentication",
-                       Status = EpicStatus.Active
-                   },
-                   new Epic
-                   {
-                       Id = Guid.NewGuid(),
-                       ProjectId = projectId,
-                       Title = "Issue Management",
-                       Status = EpicStatus.Active
-                   }
-               };
+            {
+                new Epic
+                {
+                    Id = Guid.NewGuid(),
+                    ProjectId = projectId,
+                    Title = "Authentication",
+                    Status = EpicStatus.Active
+                },
+                new Epic
+                {
+                    Id = Guid.NewGuid(),
+                    ProjectId = projectId,
+                    Title = "Issue Management",
+                    Status = EpicStatus.Active
+                }
+            };
 
             _projectRepositoryMock
                 .Setup(r => r.GetByIdAsync(projectId))
@@ -619,9 +689,7 @@ namespace BugTracker.UnitTests.Services
             result.Should().HaveCount(2);
             result.Should().OnlyContain(e => e.Status == EpicStatus.Active);
 
-            _epicRepositoryMock.Verify(
-                r => r.GetActiveEpicsAsync(projectId),
-                Times.Once);
+            _epicRepositoryMock.Verify(r => r.GetActiveEpicsAsync(projectId), Times.Once);
         }
     }
 }

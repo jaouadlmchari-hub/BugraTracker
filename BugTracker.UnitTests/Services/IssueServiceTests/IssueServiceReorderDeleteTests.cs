@@ -1,4 +1,5 @@
-﻿using BugTracker.Application.DTOs.Issues;
+﻿using BugTracker.Application.DTOs.Audit;
+using BugTracker.Application.DTOs.Issues;
 using BugTracker.Application.Exceptions;
 using BugTracker.Domain.Entities;
 using BugTracker.Domain.Enums;
@@ -27,8 +28,10 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
                 r => r.GetByIdsAsync(It.IsAny<IEnumerable<Guid>>()),
                 Times.Never);
 
-            UnitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
+            UnitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
+
+            AuditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
                 Times.Never);
         }
 
@@ -39,18 +42,10 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
             var issueId = Guid.NewGuid();
 
             var items = new List<ReorderIssueItemDto>
-                {
-                    new ReorderIssueItemDto
-                    {
-                        IssueId = issueId,
-                        DisplayOrder = 1
-                    },
-                    new ReorderIssueItemDto
-                    {
-                        IssueId = issueId,
-                        DisplayOrder = 2
-                    }
-                };
+            {
+                new ReorderIssueItemDto { IssueId = issueId, DisplayOrder = 1 },
+                new ReorderIssueItemDto { IssueId = issueId, DisplayOrder = 2 }
+            };
 
             // Act
             Func<Task> act = () => Sut.ReorderAsync(items);
@@ -62,8 +57,10 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
                 r => r.GetByIdsAsync(It.IsAny<IEnumerable<Guid>>()),
                 Times.Never);
 
-            UnitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
+            UnitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
+
+            AuditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
                 Times.Never);
         }
 
@@ -75,29 +72,21 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
             var issueId2 = Guid.NewGuid();
 
             var items = new List<ReorderIssueItemDto>
-                {
-                    new ReorderIssueItemDto
-                    {
-                        IssueId = issueId1,
-                        DisplayOrder = 1
-                    },
-                    new ReorderIssueItemDto
-                    {
-                        IssueId = issueId2,
-                        DisplayOrder = 2
-                    }
-                };
+            {
+                new ReorderIssueItemDto { IssueId = issueId1, DisplayOrder = 1 },
+                new ReorderIssueItemDto { IssueId = issueId2, DisplayOrder = 2 }
+            };
 
             var existingIssues = new List<Issue>
+            {
+                new Issue
                 {
-                    new Issue
-                    {
-                        Id = issueId1,
-                        ProjectId = Guid.NewGuid(),
-                        Title = "Issue 1",
-                        DisplayOrder = 10
-                    }
-                };
+                    Id = issueId1,
+                    ProjectId = Guid.NewGuid(),
+                    Title = "Issue 1",
+                    DisplayOrder = 10
+                }
+            };
 
             IssueRepositoryMock
                 .Setup(r => r.GetByIdsAsync(It.Is<IEnumerable<Guid>>(ids =>
@@ -113,8 +102,10 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
 
             existingIssues[0].DisplayOrder.Should().Be(10);
 
-            UnitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
+            UnitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
+
+            AuditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
                 Times.Never);
         }
 
@@ -128,36 +119,28 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
             var projectId2 = Guid.NewGuid();
 
             var items = new List<ReorderIssueItemDto>
-                {
-                    new ReorderIssueItemDto
-                    {
-                        IssueId = issueId1,
-                        DisplayOrder = 1
-                    },
-                    new ReorderIssueItemDto
-                    {
-                        IssueId = issueId2,
-                        DisplayOrder = 2
-                    }
-               };
+            {
+                new ReorderIssueItemDto { IssueId = issueId1, DisplayOrder = 1 },
+                new ReorderIssueItemDto { IssueId = issueId2, DisplayOrder = 2 }
+            };
 
             var issues = new List<Issue>
-               {
-                  new Issue
-                  {
-                      Id = issueId1,
-                      ProjectId = projectId1,
-                      Title = "Issue 1",
-                      DisplayOrder = 10
-                  },
-                  new Issue
-                  {
-                      Id = issueId2,
-                      ProjectId = projectId2,
-                      Title = "Issue 2",
-                      DisplayOrder = 20
-                  }
-               };
+            {
+                new Issue
+                {
+                    Id = issueId1,
+                    ProjectId = projectId1,
+                    Title = "Issue 1",
+                    DisplayOrder = 10
+                },
+                new Issue
+                {
+                    Id = issueId2,
+                    ProjectId = projectId2,
+                    Title = "Issue 2",
+                    DisplayOrder = 20
+                }
+            };
 
             IssueRepositoryMock
                 .Setup(r => r.GetByIdsAsync(It.IsAny<IEnumerable<Guid>>()))
@@ -173,6 +156,10 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
             issues[1].DisplayOrder.Should().Be(20);
 
             UnitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
+
+            AuditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+                Times.Never);
         }
 
         [Fact]
@@ -185,48 +172,36 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
             var issueId3 = Guid.NewGuid();
 
             var items = new List<ReorderIssueItemDto>
-                {
-                    new ReorderIssueItemDto
-                    {
-                        IssueId = issueId1,
-                        DisplayOrder = 3
-                    },
-                    new ReorderIssueItemDto
-                    {
-                        IssueId = issueId2,
-                        DisplayOrder = 1
-                    },
-                    new ReorderIssueItemDto
-                    {
-                        IssueId = issueId3,
-                        DisplayOrder = 2
-                    }
-                };
+            {
+                new ReorderIssueItemDto { IssueId = issueId1, DisplayOrder = 3 },
+                new ReorderIssueItemDto { IssueId = issueId2, DisplayOrder = 1 },
+                new ReorderIssueItemDto { IssueId = issueId3, DisplayOrder = 2 }
+            };
 
             var issues = new List<Issue>
+            {
+                new Issue
                 {
-                    new Issue
-                    {
-                        Id = issueId1,
-                        ProjectId = projectId,
-                        Title = "Issue 1",
-                        DisplayOrder = 1
-                    },
-                    new Issue
-                    {
-                        Id = issueId2,
-                        ProjectId = projectId,
-                        Title = "Issue 2",
-                        DisplayOrder = 2
-                    },
-                    new Issue
-                    {
-                        Id = issueId3,
-                        ProjectId = projectId,
-                        Title = "Issue 3",
-                        DisplayOrder = 3
-                    }
-                };
+                    Id = issueId1,
+                    ProjectId = projectId,
+                    Title = "Issue 1",
+                    DisplayOrder = 1
+                },
+                new Issue
+                {
+                    Id = issueId2,
+                    ProjectId = projectId,
+                    Title = "Issue 2",
+                    DisplayOrder = 2
+                },
+                new Issue
+                {
+                    Id = issueId3,
+                    ProjectId = projectId,
+                    Title = "Issue 3",
+                    DisplayOrder = 3
+                }
+            };
 
             IssueRepositoryMock
                 .Setup(r => r.GetByIdsAsync(It.IsAny<IEnumerable<Guid>>()))
@@ -248,6 +223,11 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
                 Times.Once);
 
             UnitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
+
+            // Reorder n'a pas d'audit dans le service
+            AuditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+                Times.Never);
         }
 
         [Fact]
@@ -268,6 +248,10 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
 
             IssueRepositoryMock.Verify(r => r.Delete(It.IsAny<Issue>()), Times.Never);
             UnitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
+
+            AuditServiceMock.Verify(
+                a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
+                Times.Never);
         }
 
         [Fact]
@@ -293,6 +277,15 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
             // Assert
             IssueRepositoryMock.Verify(r => r.Delete(issue), Times.Once);
             UnitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
+
+            AuditServiceMock.Verify(
+                a => a.LogAsync(
+                    It.Is<CreateAuditLogDto>(dto =>
+                        dto.Action == AuditAction.IssueDeleted &&
+                        dto.UserId == CurrentUserId &&
+                        dto.EntityName == nameof(Issue)),
+                    It.IsAny<CancellationToken>()),
+                Times.Once);
         }
     }
 }

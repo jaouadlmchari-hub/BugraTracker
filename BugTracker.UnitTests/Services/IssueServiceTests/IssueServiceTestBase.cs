@@ -1,7 +1,9 @@
-﻿using BugTracker.Application.Interfaces.Persistence;
+﻿using BugTracker.Application.Interfaces;
+using BugTracker.Application.Interfaces.Persistence;
 using BugTracker.Application.Interfaces.Repositories;
 using BugTracker.Application.Interfaces.Services;
 using BugTracker.Application.Services;
+using Microsoft.Extensions.Logging;
 using Moq;
 
 namespace BugTracker.UnitTests.Services.IssueServiceTests
@@ -16,8 +18,13 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
         protected readonly Mock<IEpicRepository> EpicRepositoryMock;
         protected readonly Mock<ICurrentUserService> CurrentUserServiceMock;
         protected readonly Mock<IActivityLogService> ActivityLogServiceMock;
+        protected readonly Mock<IAuditService> AuditServiceMock;
+        protected readonly Mock<ILogger<IssueService>> LoggerMock;
         protected readonly Mock<ITransaction> TransactionMock;
         protected readonly IssueService Sut;
+
+        protected readonly Guid CurrentUserId = Guid.NewGuid();
+        protected const string CurrentUserEmail = "test@example.com";
 
         protected IssueServiceTestBase()
         {
@@ -29,6 +36,8 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
             EpicRepositoryMock = new Mock<IEpicRepository>();
             CurrentUserServiceMock = new Mock<ICurrentUserService>();
             ActivityLogServiceMock = new Mock<IActivityLogService>();
+            AuditServiceMock = new Mock<IAuditService>();
+            LoggerMock = new Mock<ILogger<IssueService>>();
             TransactionMock = new Mock<ITransaction>();
 
             UnitOfWorkMock.SetupGet(u => u.Issues).Returns(IssueRepositoryMock.Object);
@@ -38,7 +47,15 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
             UnitOfWorkMock.SetupGet(u => u.Epics).Returns(EpicRepositoryMock.Object);
             UnitOfWorkMock.Setup(u => u.BeginTransactionAsync()).ReturnsAsync(TransactionMock.Object);
 
-            Sut = new IssueService(UnitOfWorkMock.Object, CurrentUserServiceMock.Object, ActivityLogServiceMock.Object);
+            CurrentUserServiceMock.SetupGet(c => c.UserId).Returns(CurrentUserId);
+            CurrentUserServiceMock.SetupGet(c => c.Email).Returns(CurrentUserEmail);
+
+            Sut = new IssueService(
+                UnitOfWorkMock.Object,
+                CurrentUserServiceMock.Object,
+                ActivityLogServiceMock.Object,
+                AuditServiceMock.Object,
+                LoggerMock.Object);
         }
     }
 }

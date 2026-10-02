@@ -1,8 +1,8 @@
-﻿using BugTracker.Domain.Entities;
+﻿using BugTracker.Application.DTOs.Issues;
+using BugTracker.Domain.Entities;
 using BugTracker.Domain.Enums;
 using FluentAssertions;
 using Moq;
-
 
 namespace BugTracker.UnitTests.Services.IssueServiceTests
 {
@@ -77,26 +77,26 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
             };
 
             var issues = new List<Issue>
+            {
+                new Issue
                 {
-                    new Issue
-                    {
-                        Id = Guid.NewGuid(),
-                        ProjectId = projectId,
-                        Title = "Login bug",
-                        Type = IssueType.Bug,
-                        Status = IssueStatus.Todo,
-                        Priority = Priority.High
-                    },
-                    new Issue
-                    {
-                        Id = Guid.NewGuid(),
-                        ProjectId = projectId,
-                        Title = "Create dashboard",
-                        Type = IssueType.Task,
-                        Status = IssueStatus.InProgress,
-                        Priority = Priority.Medium
-                    }
-                };
+                    Id = Guid.NewGuid(),
+                    ProjectId = projectId,
+                    Title = "Login bug",
+                    Type = IssueType.Bug,
+                    Status = IssueStatus.Todo,
+                    Priority = Priority.High
+                },
+                new Issue
+                {
+                    Id = Guid.NewGuid(),
+                    ProjectId = projectId,
+                    Title = "Create dashboard",
+                    Type = IssueType.Task,
+                    Status = IssueStatus.InProgress,
+                    Priority = Priority.Medium
+                }
+            };
 
             const int totalCount = 25;
 
@@ -113,16 +113,13 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
 
             // Assert
             result.Items.Should().HaveCount(2);
-
             result.Items.Should().Contain(i => i.Title == "Login bug");
             result.Items.Should().Contain(i => i.Title == "Create dashboard");
-
             result.TotalCount.Should().Be(totalCount);
             result.PageNumber.Should().Be(2);
             result.PageSize.Should().Be(10);
 
             IssueRepositoryMock.Verify(r => r.GetPaginatedAsync(projectId, filter), Times.Once);
         }
-
     }
 }

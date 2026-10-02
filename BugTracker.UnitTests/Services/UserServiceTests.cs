@@ -1,5 +1,8 @@
-﻿using BugTracker.Application.DTOs.Users;
+﻿using BugTracker.Application.DTOs.Audit;
+using BugTracker.Application.DTOs.Common;
+using BugTracker.Application.DTOs.Users;
 using BugTracker.Application.Exceptions;
+using BugTracker.Application.Interfaces;
 using BugTracker.Application.Interfaces.Persistence;
 using BugTracker.Application.Interfaces.Repositories;
 using BugTracker.Application.Interfaces.Services;
@@ -7,7 +10,9 @@ using BugTracker.Application.Services;
 using BugTracker.Domain.Entities;
 using BugTracker.Domain.Enums;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Moq;
+using Xunit;
 
 namespace BugTracker.UnitTests.Services
 {
@@ -16,6 +21,8 @@ namespace BugTracker.UnitTests.Services
         private readonly Mock<IUnitOfWork> _unitOfWorkMock;
         private readonly Mock<IUserRepository> _userRepositoryMock;
         private readonly Mock<IPasswordHasher> _passwordHasherMock;
+        private readonly Mock<IAuditService> _auditServiceMock;
+        private readonly Mock<ILogger<UserService>> _loggerMock;
         private readonly UserService _sut;
 
         public UserServiceTests()
@@ -23,6 +30,8 @@ namespace BugTracker.UnitTests.Services
             _unitOfWorkMock = new Mock<IUnitOfWork>();
             _userRepositoryMock = new Mock<IUserRepository>();
             _passwordHasherMock = new Mock<IPasswordHasher>();
+            _auditServiceMock = new Mock<IAuditService>();
+            _loggerMock = new Mock<ILogger<UserService>>();
 
             _unitOfWorkMock
                 .SetupGet(u => u.Users)
@@ -30,8 +39,12 @@ namespace BugTracker.UnitTests.Services
 
             _sut = new UserService(
                 _unitOfWorkMock.Object,
-                _passwordHasherMock.Object);
+                _passwordHasherMock.Object,
+                _auditServiceMock.Object,
+                _loggerMock.Object);
         }
+
+        // ==================== CREATE ====================
 
         [Fact]
         public async Task CreateAsync_WhenEmailAlreadyExists_ShouldThrowConflictException()
@@ -54,17 +67,10 @@ namespace BugTracker.UnitTests.Services
             // Assert
             await act.Should().ThrowAsync<ConflictException>();
 
-            _passwordHasherMock.Verify(
-                h => h.Hash(It.IsAny<string>()),
-                Times.Never);
-
-            _userRepositoryMock.Verify(
-                r => r.AddAsync(It.IsAny<User>()),
-                Times.Never);
-
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _passwordHasherMock.Verify(h => h.Hash(It.IsAny<string>()), Times.Never);
+            _userRepositoryMock.Verify(r => r.AddAsync(It.IsAny<User>()), Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -92,17 +98,10 @@ namespace BugTracker.UnitTests.Services
             // Assert
             await act.Should().ThrowAsync<ConflictException>();
 
-            _passwordHasherMock.Verify(
-                h => h.Hash(It.IsAny<string>()),
-                Times.Never);
-
-            _userRepositoryMock.Verify(
-                r => r.AddAsync(It.IsAny<User>()),
-                Times.Never);
-
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _passwordHasherMock.Verify(h => h.Hash(It.IsAny<string>()), Times.Never);
+            _userRepositoryMock.Verify(r => r.AddAsync(It.IsAny<User>()), Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -142,7 +141,6 @@ namespace BugTracker.UnitTests.Services
 
             // Assert
             createdUser.Should().NotBeNull();
-
             createdUser!.Username.Should().Be(dto.Username);
             createdUser.Email.Should().Be(dto.Email);
             createdUser.PasswordHash.Should().Be(passwordHash);
@@ -155,8 +153,23 @@ namespace BugTracker.UnitTests.Services
 
             _passwordHasherMock.Verify(h => h.Hash(dto.Password), Times.Once);
             _userRepositoryMock.Verify(r => r.AddAsync(createdUser), Times.Once);
+
+            _auditServiceMock.Verify(a => a.LogAsync(
+                It.Is<CreateAuditLogDto>(d =>
+                    d.UserId == createdUser.Id &&
+                    d.UserEmail == createdUser.Email &&
+                    d.Action == AuditAction.UserCreated &&
+                    d.EntityName == nameof(User) &&
+                    d.EntityId == createdUser.Id.ToString() &&
+                    d.Details != null &&
+                    d.Details.Contains("Création du compte utilisateur")),
+                It.IsAny<CancellationToken>()),
+                Times.Once);
+
             _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
         }
+
+        // ==================== ADMIN CREATE ====================
 
         [Fact]
         public async Task AdminCreateAsync_WhenEmailAlreadyExists_ShouldThrowConflictException()
@@ -181,9 +194,8 @@ namespace BugTracker.UnitTests.Services
             await act.Should().ThrowAsync<ConflictException>();
 
             _passwordHasherMock.Verify(h => h.Hash(It.IsAny<string>()), Times.Never);
-
             _userRepositoryMock.Verify(r => r.AddAsync(It.IsAny<User>()), Times.Never);
-
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
             _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
@@ -214,9 +226,8 @@ namespace BugTracker.UnitTests.Services
             await act.Should().ThrowAsync<ConflictException>();
 
             _passwordHasherMock.Verify(h => h.Hash(It.IsAny<string>()), Times.Never);
-
             _userRepositoryMock.Verify(r => r.AddAsync(It.IsAny<User>()), Times.Never);
-
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
             _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
@@ -258,7 +269,6 @@ namespace BugTracker.UnitTests.Services
 
             // Assert
             createdUser.Should().NotBeNull();
-
             createdUser!.Username.Should().Be(dto.Username);
             createdUser.Email.Should().Be(dto.Email);
             createdUser.PasswordHash.Should().Be(passwordHash);
@@ -271,15 +281,29 @@ namespace BugTracker.UnitTests.Services
 
             _passwordHasherMock.Verify(h => h.Hash(dto.Password), Times.Once);
             _userRepositoryMock.Verify(r => r.AddAsync(createdUser), Times.Once);
+
+            _auditServiceMock.Verify(a => a.LogAsync(
+                It.Is<CreateAuditLogDto>(d =>
+                    d.UserId == createdUser.Id &&
+                    d.UserEmail == createdUser.Email &&
+                    d.Action == AuditAction.UserCreated &&
+                    d.EntityName == nameof(User) &&
+                    d.EntityId == createdUser.Id.ToString() &&
+                    d.Details != null &&
+                    d.Details.Contains("Création administrative")),
+                It.IsAny<CancellationToken>()),
+                Times.Once);
+
             _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
         }
+
+        // ==================== UPDATE ====================
 
         [Fact]
         public async Task UpdateAsync_WhenUserDoesNotExist_ShouldThrowNotFoundException()
         {
             // Arrange
             var userId = Guid.NewGuid();
-
             var dto = new UpdateUserDto
             {
                 Username = "jaouad.updated",
@@ -296,6 +320,7 @@ namespace BugTracker.UnitTests.Services
             // Assert
             await act.Should().ThrowAsync<NotFoundException>();
 
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
             _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
@@ -304,8 +329,6 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var userId = Guid.NewGuid();
-            var anotherUserId = Guid.NewGuid();
-
             var user = new User
             {
                 Id = userId,
@@ -331,9 +354,13 @@ namespace BugTracker.UnitTests.Services
             // Act
             Func<Task> act = () => _sut.UpdateAsync(userId, dto);
 
+            // Assert
+            await act.Should().ThrowAsync<ConflictException>();
+
             user.Username.Should().Be("jaouad");
             user.Email.Should().Be("old@test.com");
 
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
             _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
@@ -342,7 +369,6 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var userId = Guid.NewGuid();
-
             var user = new User
             {
                 Id = userId,
@@ -378,6 +404,7 @@ namespace BugTracker.UnitTests.Services
             user.Username.Should().Be("jaouad");
             user.Email.Should().Be("old@test.com");
 
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
             _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
@@ -386,7 +413,6 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var userId = Guid.NewGuid();
-
             var user = new User
             {
                 Id = userId,
@@ -426,8 +452,22 @@ namespace BugTracker.UnitTests.Services
             result.Username.Should().Be(dto.Username);
             result.Email.Should().Be(dto.Email);
 
+            _auditServiceMock.Verify(a => a.LogAsync(
+                It.Is<CreateAuditLogDto>(d =>
+                    d.UserId == userId &&
+                    d.UserEmail == user.Email &&
+                    d.Action == AuditAction.UserUpdated &&
+                    d.EntityName == nameof(User) &&
+                    d.EntityId == userId.ToString() &&
+                    d.Details != null &&
+                    d.Details.Contains("Mise à jour des informations de profil")),
+                It.IsAny<CancellationToken>()),
+                Times.Once);
+
             _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
         }
+
+        // ==================== DEACTIVATE / ACTIVATE ====================
 
         [Fact]
         public async Task DeactivateAsync_WhenUserDoesNotExist_ShouldThrowNotFoundException()
@@ -445,6 +485,7 @@ namespace BugTracker.UnitTests.Services
             // Assert
             await act.Should().ThrowAsync<NotFoundException>();
 
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
             _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
@@ -453,7 +494,6 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var userId = Guid.NewGuid();
-
             var user = new User
             {
                 Id = userId,
@@ -475,6 +515,18 @@ namespace BugTracker.UnitTests.Services
             user.IsActive.Should().BeFalse();
             user.UpdatedAt.Should().BeOnOrAfter(beforeDeactivation);
 
+            _auditServiceMock.Verify(a => a.LogAsync(
+                It.Is<CreateAuditLogDto>(d =>
+                    d.UserId == userId &&
+                    d.UserEmail == user.Email &&
+                    d.Action == AuditAction.UserDeactivated &&
+                    d.EntityName == nameof(User) &&
+                    d.EntityId == userId.ToString() &&
+                    d.Details != null &&
+                    d.Details.Contains("Désactivation du compte")),
+                It.IsAny<CancellationToken>()),
+                Times.Once);
+
             _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
         }
 
@@ -494,6 +546,7 @@ namespace BugTracker.UnitTests.Services
             // Assert
             await act.Should().ThrowAsync<NotFoundException>();
 
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
             _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
@@ -502,7 +555,6 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var userId = Guid.NewGuid();
-
             var user = new User
             {
                 Id = userId,
@@ -524,8 +576,22 @@ namespace BugTracker.UnitTests.Services
             user.IsActive.Should().BeTrue();
             user.UpdatedAt.Should().BeOnOrAfter(beforeActivation);
 
+            _auditServiceMock.Verify(a => a.LogAsync(
+                It.Is<CreateAuditLogDto>(d =>
+                    d.UserId == userId &&
+                    d.UserEmail == user.Email &&
+                    d.Action == AuditAction.UserActivated &&
+                    d.EntityName == nameof(User) &&
+                    d.EntityId == userId.ToString() &&
+                    d.Details != null &&
+                    d.Details.Contains("Réactivation du compte")),
+                It.IsAny<CancellationToken>()),
+                Times.Once);
+
             _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
         }
+
+        // ==================== CHANGE ROLE ====================
 
         [Fact]
         public async Task ChangeSystemRoleAsync_WhenUserDoesNotExist_ShouldThrowNotFoundException()
@@ -543,6 +609,7 @@ namespace BugTracker.UnitTests.Services
             // Assert
             await act.Should().ThrowAsync<NotFoundException>();
 
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
             _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
@@ -551,7 +618,6 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var userId = Guid.NewGuid();
-
             var user = new User
             {
                 Id = userId,
@@ -575,6 +641,7 @@ namespace BugTracker.UnitTests.Services
 
             user.SystemRole.Should().Be(SystemRole.Developer);
 
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
             _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
@@ -583,7 +650,6 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var userId = Guid.NewGuid();
-
             var user = new User
             {
                 Id = userId,
@@ -606,15 +672,28 @@ namespace BugTracker.UnitTests.Services
             user.SystemRole.Should().Be(SystemRole.Admin);
             user.UpdatedAt.Should().BeOnOrAfter(beforeChange);
 
+            _auditServiceMock.Verify(a => a.LogAsync(
+                It.Is<CreateAuditLogDto>(d =>
+                    d.UserId == userId &&
+                    d.UserEmail == user.Email &&
+                    d.Action == AuditAction.UserRoleChanged &&
+                    d.EntityName == nameof(User) &&
+                    d.EntityId == userId.ToString() &&
+                    d.Details != null &&
+                    d.Details.Contains("Changement de rôle système")),
+                It.IsAny<CancellationToken>()),
+                Times.Once);
+
             _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
         }
+
+        // ==================== CHANGE PASSWORD ====================
 
         [Fact]
         public async Task ChangePasswordAsync_WhenUserDoesNotExist_ShouldThrowNotFoundException()
         {
             // Arrange
             var userId = Guid.NewGuid();
-
             var dto = new ChangePasswordDto
             {
                 CurrentPassword = "OldPassword123!",
@@ -631,17 +710,10 @@ namespace BugTracker.UnitTests.Services
             // Assert
             await act.Should().ThrowAsync<NotFoundException>();
 
-            _passwordHasherMock.Verify(
-                h => h.Verify(It.IsAny<string>(), It.IsAny<string>()),
-                Times.Never);
-
-            _passwordHasherMock.Verify(
-                h => h.Hash(It.IsAny<string>()),
-                Times.Never);
-
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _passwordHasherMock.Verify(h => h.Verify(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+            _passwordHasherMock.Verify(h => h.Hash(It.IsAny<string>()), Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -649,7 +721,6 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var userId = Guid.NewGuid();
-
             var user = new User
             {
                 Id = userId,
@@ -682,6 +753,7 @@ namespace BugTracker.UnitTests.Services
             user.PasswordHash.Should().Be("old-password-hash");
 
             _passwordHasherMock.Verify(h => h.Hash(It.IsAny<string>()), Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
             _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
@@ -690,7 +762,6 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var userId = Guid.NewGuid();
-
             var user = new User
             {
                 Id = userId,
@@ -714,6 +785,11 @@ namespace BugTracker.UnitTests.Services
                 .Setup(h => h.Verify(dto.CurrentPassword, user.PasswordHash))
                 .Returns(true);
 
+            // Le service vérifie aussi le nouveau mot de passe
+            _passwordHasherMock
+                .Setup(h => h.Verify(dto.NewPassword, user.PasswordHash))
+                .Returns(true);
+
             // Act
             Func<Task> act = () => _sut.ChangePasswordAsync(userId, dto);
 
@@ -723,6 +799,7 @@ namespace BugTracker.UnitTests.Services
             user.PasswordHash.Should().Be("old-password-hash");
 
             _passwordHasherMock.Verify(h => h.Hash(It.IsAny<string>()), Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
             _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
@@ -731,7 +808,6 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var userId = Guid.NewGuid();
-
             var user = new User
             {
                 Id = userId,
@@ -758,6 +834,10 @@ namespace BugTracker.UnitTests.Services
                 .Returns(true);
 
             _passwordHasherMock
+                .Setup(h => h.Verify(dto.NewPassword, user.PasswordHash))
+                .Returns(false);
+
+            _passwordHasherMock
                 .Setup(h => h.Hash(dto.NewPassword))
                 .Returns(newPasswordHash);
 
@@ -768,19 +848,35 @@ namespace BugTracker.UnitTests.Services
 
             // Assert
             user.PasswordHash.Should().Be(newPasswordHash);
+            user.FailedLoginAttempts.Should().Be(0);
+            user.LockoutUntil.Should().BeNull();
             user.UpdatedAt.Should().BeOnOrAfter(beforeChange);
 
             _passwordHasherMock.Verify(h => h.Verify(dto.CurrentPassword, "old-password-hash"), Times.Once);
             _passwordHasherMock.Verify(h => h.Hash(dto.NewPassword), Times.Once);
+
+            _auditServiceMock.Verify(a => a.LogAsync(
+                It.Is<CreateAuditLogDto>(d =>
+                    d.UserId == userId &&
+                    d.UserEmail == user.Email &&
+                    d.Action == AuditAction.PasswordChanged &&
+                    d.EntityName == nameof(User) &&
+                    d.EntityId == userId.ToString() &&
+                    d.Details != null &&
+                    d.Details.Contains("Changement de mot de passe")),
+                It.IsAny<CancellationToken>()),
+                Times.Once);
+
             _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
         }
+
+        // ==================== RESET PASSWORD ====================
 
         [Fact]
         public async Task ResetPasswordAsync_WhenUserDoesNotExist_ShouldThrowNotFoundException()
         {
             // Arrange
             var userId = Guid.NewGuid();
-
             var dto = new ResetPasswordDto
             {
                 NewPassword = "NewPassword123!"
@@ -797,6 +893,7 @@ namespace BugTracker.UnitTests.Services
             await act.Should().ThrowAsync<NotFoundException>();
 
             _passwordHasherMock.Verify(h => h.Hash(It.IsAny<string>()), Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
             _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
@@ -805,7 +902,6 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var userId = Guid.NewGuid();
-
             var user = new User
             {
                 Id = userId,
@@ -844,8 +940,23 @@ namespace BugTracker.UnitTests.Services
             user.UpdatedAt.Should().BeOnOrAfter(beforeReset);
 
             _passwordHasherMock.Verify(h => h.Hash(dto.NewPassword), Times.Once);
+
+            _auditServiceMock.Verify(a => a.LogAsync(
+                It.Is<CreateAuditLogDto>(d =>
+                    d.UserId == userId &&
+                    d.UserEmail == user.Email &&
+                    d.Action == AuditAction.PasswordReset &&
+                    d.EntityName == nameof(User) &&
+                    d.EntityId == userId.ToString() &&
+                    d.Details != null &&
+                    d.Details.Contains("Réinitialisation du mot de passe")),
+                It.IsAny<CancellationToken>()),
+                Times.Once);
+
             _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
         }
+
+        // ==================== UNLOCK ====================
 
         [Fact]
         public async Task UnlockUserAsync_WhenUserDoesNotExist_ShouldThrowNotFoundException()
@@ -863,6 +974,7 @@ namespace BugTracker.UnitTests.Services
             // Assert
             await act.Should().ThrowAsync<NotFoundException>();
 
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
             _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
@@ -871,7 +983,6 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var userId = Guid.NewGuid();
-
             var user = new User
             {
                 Id = userId,
@@ -896,15 +1007,28 @@ namespace BugTracker.UnitTests.Services
             user.LockoutUntil.Should().BeNull();
             user.UpdatedAt.Should().BeOnOrAfter(beforeUnlock);
 
+            _auditServiceMock.Verify(a => a.LogAsync(
+                It.Is<CreateAuditLogDto>(d =>
+                    d.UserId == userId &&
+                    d.UserEmail == user.Email &&
+                    d.Action == AuditAction.UserUnlocked &&
+                    d.EntityName == nameof(User) &&
+                    d.EntityId == userId.ToString() &&
+                    d.Details != null &&
+                    d.Details.Contains("Déverrouillage manuel")),
+                It.IsAny<CancellationToken>()),
+                Times.Once);
+
             _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
         }
+
+        // ==================== GETTERS ====================
 
         [Fact]
         public async Task GetByIdAsync_WhenUserExists_ShouldReturnUserDto()
         {
             // Arrange
             var userId = Guid.NewGuid();
-
             var user = new User
             {
                 Id = userId,
@@ -952,7 +1076,6 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             const string email = "jaouad@test.com";
-
             var user = new User
             {
                 Id = Guid.NewGuid(),
@@ -998,24 +1121,24 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var users = new List<User>
+            {
+                new User
                 {
-                    new User
-                    {
-                        Id = Guid.NewGuid(),
-                        Username = "developer1",
-                        Email = "developer1@test.com",
-                        SystemRole = SystemRole.Developer,
-                        IsActive = true
-                    },
-                    new User
-                    {
-                        Id = Guid.NewGuid(),
-                        Username = "developer2",
-                        Email = "developer2@test.com",
-                        SystemRole = SystemRole.Developer,
-                        IsActive = true
-                    }
-                };
+                    Id = Guid.NewGuid(),
+                    Username = "developer1",
+                    Email = "developer1@test.com",
+                    SystemRole = SystemRole.Developer,
+                    IsActive = true
+                },
+                new User
+                {
+                    Id = Guid.NewGuid(),
+                    Username = "developer2",
+                    Email = "developer2@test.com",
+                    SystemRole = SystemRole.Developer,
+                    IsActive = true
+                }
+            };
 
             _userRepositoryMock
                 .Setup(r => r.GetActiveUsersAsync())
@@ -1026,10 +1149,8 @@ namespace BugTracker.UnitTests.Services
 
             // Assert
             result.Should().HaveCount(2);
-
             result.Should().Contain(u => u.Username == "developer1");
             result.Should().Contain(u => u.Username == "developer2");
-
             result.Should().OnlyContain(u => u.IsActive);
         }
 
@@ -1044,24 +1165,24 @@ namespace BugTracker.UnitTests.Services
             };
 
             var users = new List<User>
+            {
+                new User
                 {
-                    new User
-                    {
-                        Id = Guid.NewGuid(),
-                        Username = "user1",
-                        Email = "user1@test.com",
-                        SystemRole = SystemRole.Developer,
-                        IsActive = true
-                    },
-                    new User
-                    {
-                        Id = Guid.NewGuid(),
-                        Username = "user2",
-                        Email = "user2@test.com",
-                        SystemRole = SystemRole.Admin,
-                        IsActive = true
-                    }
-                };
+                    Id = Guid.NewGuid(),
+                    Username = "user1",
+                    Email = "user1@test.com",
+                    SystemRole = SystemRole.Developer,
+                    IsActive = true
+                },
+                new User
+                {
+                    Id = Guid.NewGuid(),
+                    Username = "user2",
+                    Email = "user2@test.com",
+                    SystemRole = SystemRole.Admin,
+                    IsActive = true
+                }
+            };
 
             const int totalCount = 25;
 
@@ -1074,17 +1195,13 @@ namespace BugTracker.UnitTests.Services
 
             // Assert
             result.Items.Should().HaveCount(2);
-
             result.Items.Should().Contain(u => u.Username == "user1");
             result.Items.Should().Contain(u => u.Username == "user2");
-
             result.TotalCount.Should().Be(totalCount);
             result.PageNumber.Should().Be(2);
             result.PageSize.Should().Be(10);
 
             _userRepositoryMock.Verify(r => r.GetPaginatedAsync(filter), Times.Once);
         }
-
-
     }
 }

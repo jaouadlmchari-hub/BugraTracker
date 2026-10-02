@@ -1,12 +1,17 @@
-﻿using BugTracker.Application.DTOs.ProjectMembers;
+﻿using BugTracker.Application.DTOs.Audit;
+using BugTracker.Application.DTOs.ProjectMembers;
 using BugTracker.Application.Exceptions;
+using BugTracker.Application.Interfaces;
 using BugTracker.Application.Interfaces.Persistence;
 using BugTracker.Application.Interfaces.Repositories;
+using BugTracker.Application.Interfaces.Services;
 using BugTracker.Application.Services;
 using BugTracker.Domain.Entities;
 using BugTracker.Domain.Enums;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Moq;
+using Xunit;
 
 namespace BugTracker.UnitTests.Services
 {
@@ -17,6 +22,9 @@ namespace BugTracker.UnitTests.Services
         private readonly Mock<IProjectRepository> _projectRepositoryMock;
         private readonly Mock<IUserRepository> _userRepositoryMock;
         private readonly Mock<IIssueRepository> _issueRepositoryMock;
+        private readonly Mock<ICurrentUserService> _currentUserServiceMock;
+        private readonly Mock<IAuditService> _auditServiceMock;
+        private readonly Mock<ILogger<ProjectMemberService>> _loggerMock;
         private readonly ProjectMemberService _sut;
 
         public ProjectMemberServiceTests()
@@ -26,6 +34,9 @@ namespace BugTracker.UnitTests.Services
             _projectRepositoryMock = new Mock<IProjectRepository>();
             _userRepositoryMock = new Mock<IUserRepository>();
             _issueRepositoryMock = new Mock<IIssueRepository>();
+            _currentUserServiceMock = new Mock<ICurrentUserService>();
+            _auditServiceMock = new Mock<IAuditService>();
+            _loggerMock = new Mock<ILogger<ProjectMemberService>>();
 
             _unitOfWorkMock
                 .SetupGet(u => u.ProjectMembers)
@@ -43,15 +54,20 @@ namespace BugTracker.UnitTests.Services
                 .SetupGet(u => u.Issues)
                 .Returns(_issueRepositoryMock.Object);
 
-            _sut = new ProjectMemberService(_unitOfWorkMock.Object);
+            _sut = new ProjectMemberService(
+                _unitOfWorkMock.Object,
+                _currentUserServiceMock.Object,
+                _auditServiceMock.Object,
+                _loggerMock.Object);
         }
+
+        // ==================== ADD MEMBER ====================
 
         [Fact]
         public async Task AddMemberAsync_WhenProjectDoesNotExist_ShouldThrowNotFoundException()
         {
             // Arrange
             var projectId = Guid.NewGuid();
-
             var dto = new AddProjectMemberDto
             {
                 UserId = Guid.NewGuid(),
@@ -66,20 +82,12 @@ namespace BugTracker.UnitTests.Services
             Func<Task> act = () => _sut.AddMemberAsync(projectId, dto);
 
             // Assert
-            await act.Should()
-                .ThrowAsync<NotFoundException>();
+            await act.Should().ThrowAsync<NotFoundException>();
 
-            _userRepositoryMock.Verify(
-                r => r.GetByIdAsync(It.IsAny<Guid>()),
-                Times.Never);
-
-            _projectMemberRepositoryMock.Verify(
-                r => r.AddAsync(It.IsAny<ProjectMember>()),
-                Times.Never);
-
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _userRepositoryMock.Verify(r => r.GetByIdAsync(It.IsAny<Guid>()), Times.Never);
+            _projectMemberRepositoryMock.Verify(r => r.AddAsync(It.IsAny<ProjectMember>()), Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -87,7 +95,6 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var projectId = Guid.NewGuid();
-
             var project = new Project
             {
                 Id = projectId,
@@ -110,20 +117,12 @@ namespace BugTracker.UnitTests.Services
             Func<Task> act = () => _sut.AddMemberAsync(projectId, dto);
 
             // Assert
-            await act.Should()
-                .ThrowAsync<BusinessRuleException>();
+            await act.Should().ThrowAsync<BusinessRuleException>();
 
-            _userRepositoryMock.Verify(
-                r => r.GetByIdAsync(It.IsAny<Guid>()),
-                Times.Never);
-
-            _projectMemberRepositoryMock.Verify(
-                r => r.AddAsync(It.IsAny<ProjectMember>()),
-                Times.Never);
-
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _userRepositoryMock.Verify(r => r.GetByIdAsync(It.IsAny<Guid>()), Times.Never);
+            _projectMemberRepositoryMock.Verify(r => r.AddAsync(It.IsAny<ProjectMember>()), Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -159,22 +158,12 @@ namespace BugTracker.UnitTests.Services
             Func<Task> act = () => _sut.AddMemberAsync(projectId, dto);
 
             // Assert
-            await act.Should()
-                .ThrowAsync<NotFoundException>();
+            await act.Should().ThrowAsync<NotFoundException>();
 
-            _projectMemberRepositoryMock.Verify(
-                r => r.GetByProjectAndUserAsync(
-                    projectId,
-                    userId),
-                Times.Never);
-
-            _projectMemberRepositoryMock.Verify(
-                r => r.AddAsync(It.IsAny<ProjectMember>()),
-                Times.Never);
-
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _projectMemberRepositoryMock.Verify(r => r.GetByProjectAndUserAsync(projectId, userId), Times.Never);
+            _projectMemberRepositoryMock.Verify(r => r.AddAsync(It.IsAny<ProjectMember>()), Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -218,20 +207,12 @@ namespace BugTracker.UnitTests.Services
             Func<Task> act = () => _sut.AddMemberAsync(projectId, dto);
 
             // Assert
-            await act.Should()
-                .ThrowAsync<BusinessRuleException>();
+            await act.Should().ThrowAsync<BusinessRuleException>();
 
-            _projectMemberRepositoryMock.Verify(
-                r => r.GetByProjectAndUserAsync(projectId, userId),
-                Times.Never);
-
-            _projectMemberRepositoryMock.Verify(
-                r => r.AddAsync(It.IsAny<ProjectMember>()),
-                Times.Never);
-
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _projectMemberRepositoryMock.Verify(r => r.GetByProjectAndUserAsync(projectId, userId), Times.Never);
+            _projectMemberRepositoryMock.Verify(r => r.AddAsync(It.IsAny<ProjectMember>()), Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -286,16 +267,11 @@ namespace BugTracker.UnitTests.Services
             Func<Task> act = () => _sut.AddMemberAsync(projectId, dto);
 
             // Assert
-            await act.Should()
-                .ThrowAsync<BusinessRuleException>();
+            await act.Should().ThrowAsync<BusinessRuleException>();
 
-            _projectMemberRepositoryMock.Verify(
-                r => r.AddAsync(It.IsAny<ProjectMember>()),
-                Times.Never);
-
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _projectMemberRepositoryMock.Verify(r => r.AddAsync(It.IsAny<ProjectMember>()), Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -304,6 +280,8 @@ namespace BugTracker.UnitTests.Services
             // Arrange
             var projectId = Guid.NewGuid();
             var userId = Guid.NewGuid();
+            var currentUserId = Guid.NewGuid();
+            const string currentUserEmail = "admin@test.com";
 
             var project = new Project
             {
@@ -327,6 +305,14 @@ namespace BugTracker.UnitTests.Services
                 UserId = userId,
                 Role = ProjectRole.Developer
             };
+
+            _currentUserServiceMock
+                .SetupGet(c => c.UserId)
+                .Returns(currentUserId);
+
+            _currentUserServiceMock
+                .SetupGet(c => c.Email)
+                .Returns(currentUserEmail);
 
             _projectRepositoryMock
                 .Setup(r => r.GetByIdAsync(projectId))
@@ -352,7 +338,6 @@ namespace BugTracker.UnitTests.Services
 
             // Assert
             createdMember.Should().NotBeNull();
-
             createdMember!.ProjectId.Should().Be(projectId);
             createdMember.UserId.Should().Be(userId);
             createdMember.Role.Should().Be(ProjectRole.Developer);
@@ -362,14 +347,24 @@ namespace BugTracker.UnitTests.Services
             result.FullName.Should().Be("User One");
             result.Role.Should().Be(ProjectRole.Developer);
 
-            _projectMemberRepositoryMock.Verify(
-                r => r.AddAsync(It.IsAny<ProjectMember>()),
+            _projectMemberRepositoryMock.Verify(r => r.AddAsync(It.IsAny<ProjectMember>()), Times.Once);
+
+            _auditServiceMock.Verify(a => a.LogAsync(
+                It.Is<CreateAuditLogDto>(d =>
+                    d.UserId == currentUserId &&
+                    d.UserEmail == currentUserEmail &&
+                    d.Action == AuditAction.ProjectMemberAdded &&
+                    d.EntityName == nameof(ProjectMember) &&
+                    d.EntityId == $"{projectId}:{userId}" &&
+                    d.Details != null &&
+                    d.Details.Contains("Ajout de l'utilisateur")),
+                It.IsAny<CancellationToken>()),
                 Times.Once);
 
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Once);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
         }
+
+        // ==================== CHANGE ROLE ====================
 
         [Fact]
         public async Task ChangeRoleAsync_WhenProjectDoesNotExist_ShouldThrowNotFoundException()
@@ -386,16 +381,11 @@ namespace BugTracker.UnitTests.Services
             Func<Task> act = () => _sut.ChangeRoleAsync(projectId, userId, ProjectRole.QA);
 
             // Assert
-            await act.Should()
-                .ThrowAsync<NotFoundException>();
+            await act.Should().ThrowAsync<NotFoundException>();
 
-            _projectMemberRepositoryMock.Verify(
-                r => r.GetByProjectAndUserAsync(It.IsAny<Guid>(), It.IsAny<Guid>()),
-                Times.Never);
-
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _projectMemberRepositoryMock.Verify(r => r.GetByProjectAndUserAsync(It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -421,16 +411,11 @@ namespace BugTracker.UnitTests.Services
             Func<Task> act = () => _sut.ChangeRoleAsync(projectId, userId, ProjectRole.QA);
 
             // Assert
-            await act.Should()
-                .ThrowAsync<BusinessRuleException>();
+            await act.Should().ThrowAsync<BusinessRuleException>();
 
-            _projectMemberRepositoryMock.Verify(
-                r => r.GetByProjectAndUserAsync(It.IsAny<Guid>(), It.IsAny<Guid>()),
-                Times.Never);
-
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _projectMemberRepositoryMock.Verify(r => r.GetByProjectAndUserAsync(It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -460,16 +445,11 @@ namespace BugTracker.UnitTests.Services
             Func<Task> act = () => _sut.ChangeRoleAsync(projectId, userId, ProjectRole.QA);
 
             // Assert
-            await act.Should()
-                .ThrowAsync<NotFoundException>();
+            await act.Should().ThrowAsync<NotFoundException>();
 
-            _projectMemberRepositoryMock.Verify(
-                r => r.CountManagersAsync(It.IsAny<Guid>()),
-                Times.Never);
-
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _projectMemberRepositoryMock.Verify(r => r.CountManagersAsync(It.IsAny<Guid>()), Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -506,16 +486,11 @@ namespace BugTracker.UnitTests.Services
             Func<Task> act = () => _sut.ChangeRoleAsync(projectId, userId, ProjectRole.Developer);
 
             // Assert
-            await act.Should()
-                .ThrowAsync<BusinessRuleException>();
+            await act.Should().ThrowAsync<BusinessRuleException>();
 
-            _projectMemberRepositoryMock.Verify(
-                r => r.CountManagersAsync(It.IsAny<Guid>()),
-                Times.Never);
-
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _projectMemberRepositoryMock.Verify(r => r.CountManagersAsync(It.IsAny<Guid>()), Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Theory]
@@ -558,14 +533,12 @@ namespace BugTracker.UnitTests.Services
             Func<Task> act = () => _sut.ChangeRoleAsync(projectId, userId, newRole);
 
             // Assert
-            await act.Should()
-                .ThrowAsync<BusinessRuleException>();
+            await act.Should().ThrowAsync<BusinessRuleException>();
 
             member.Role.Should().Be(ProjectRole.Manager);
 
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -574,6 +547,8 @@ namespace BugTracker.UnitTests.Services
             // Arrange
             var projectId = Guid.NewGuid();
             var userId = Guid.NewGuid();
+            var currentUserId = Guid.NewGuid();
+            const string currentUserEmail = "admin@test.com";
 
             var project = new Project
             {
@@ -589,6 +564,14 @@ namespace BugTracker.UnitTests.Services
                 UserId = userId,
                 Role = ProjectRole.Manager
             };
+
+            _currentUserServiceMock
+                .SetupGet(c => c.UserId)
+                .Returns(currentUserId);
+
+            _currentUserServiceMock
+                .SetupGet(c => c.Email)
+                .Returns(currentUserEmail);
 
             _projectRepositoryMock
                 .Setup(r => r.GetByIdAsync(projectId))
@@ -608,14 +591,24 @@ namespace BugTracker.UnitTests.Services
             // Assert
             member.Role.Should().Be(ProjectRole.Developer);
 
-            _projectMemberRepositoryMock.Verify(
-                r => r.CountManagersAsync(projectId),
+            _projectMemberRepositoryMock.Verify(r => r.CountManagersAsync(projectId), Times.Once);
+
+            _auditServiceMock.Verify(a => a.LogAsync(
+                It.Is<CreateAuditLogDto>(d =>
+                    d.UserId == currentUserId &&
+                    d.UserEmail == currentUserEmail &&
+                    d.Action == AuditAction.ProjectMemberRoleChanged &&
+                    d.EntityName == nameof(ProjectMember) &&
+                    d.EntityId == $"{projectId}:{userId}" &&
+                    d.Details != null &&
+                    d.Details.Contains("Changement du rôle")),
+                It.IsAny<CancellationToken>()),
                 Times.Once);
 
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Once);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
         }
+
+        // ==================== REMOVE MEMBER ====================
 
         [Fact]
         public async Task RemoveMemberAsync_WhenProjectDoesNotExist_ShouldThrowNotFoundException()
@@ -632,20 +625,12 @@ namespace BugTracker.UnitTests.Services
             Func<Task> act = () => _sut.RemoveMemberAsync(projectId, userId);
 
             // Assert
-            await act.Should()
-                .ThrowAsync<NotFoundException>();
+            await act.Should().ThrowAsync<NotFoundException>();
 
-            _projectMemberRepositoryMock.Verify(
-                r => r.GetByProjectAndUserAsync(It.IsAny<Guid>(), It.IsAny<Guid>()),
-                Times.Never);
-
-            _projectMemberRepositoryMock.Verify(
-                r => r.Delete(It.IsAny<ProjectMember>()),
-                Times.Never);
-
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _projectMemberRepositoryMock.Verify(r => r.GetByProjectAndUserAsync(It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
+            _projectMemberRepositoryMock.Verify(r => r.Delete(It.IsAny<ProjectMember>()), Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -671,20 +656,12 @@ namespace BugTracker.UnitTests.Services
             Func<Task> act = () => _sut.RemoveMemberAsync(projectId, userId);
 
             // Assert
-            await act.Should()
-                .ThrowAsync<BusinessRuleException>();
+            await act.Should().ThrowAsync<BusinessRuleException>();
 
-            _projectMemberRepositoryMock.Verify(
-                r => r.GetByProjectAndUserAsync(It.IsAny<Guid>(), It.IsAny<Guid>()),
-                Times.Never);
-
-            _projectMemberRepositoryMock.Verify(
-                r => r.Delete(It.IsAny<ProjectMember>()),
-                Times.Never);
-
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _projectMemberRepositoryMock.Verify(r => r.GetByProjectAndUserAsync(It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
+            _projectMemberRepositoryMock.Verify(r => r.Delete(It.IsAny<ProjectMember>()), Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -714,24 +691,13 @@ namespace BugTracker.UnitTests.Services
             Func<Task> act = () => _sut.RemoveMemberAsync(projectId, userId);
 
             // Assert
-            await act.Should()
-                .ThrowAsync<NotFoundException>();
+            await act.Should().ThrowAsync<NotFoundException>();
 
-            _projectMemberRepositoryMock.Verify(
-                r => r.CountManagersAsync(It.IsAny<Guid>()),
-                Times.Never);
-
-            _issueRepositoryMock.Verify(
-                r => r.GetByProjectAndAssigneeAsync(It.IsAny<Guid>(), It.IsAny<Guid>()),
-                Times.Never);
-
-            _projectMemberRepositoryMock.Verify(
-                r => r.Delete(It.IsAny<ProjectMember>()),
-                Times.Never);
-
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _projectMemberRepositoryMock.Verify(r => r.CountManagersAsync(It.IsAny<Guid>()), Times.Never);
+            _issueRepositoryMock.Verify(r => r.GetByProjectAndAssigneeAsync(It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
+            _projectMemberRepositoryMock.Verify(r => r.Delete(It.IsAny<ProjectMember>()), Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -769,24 +735,13 @@ namespace BugTracker.UnitTests.Services
             Func<Task> act = () => _sut.RemoveMemberAsync(projectId, ownerId);
 
             // Assert
-            await act.Should()
-                .ThrowAsync<BusinessRuleException>();
+            await act.Should().ThrowAsync<BusinessRuleException>();
 
-            _projectMemberRepositoryMock.Verify(
-                r => r.CountManagersAsync(It.IsAny<Guid>()),
-                Times.Never);
-
-            _issueRepositoryMock.Verify(
-                r => r.GetByProjectAndAssigneeAsync(It.IsAny<Guid>(), It.IsAny<Guid>()),
-                Times.Never);
-
-            _projectMemberRepositoryMock.Verify(
-                r => r.Delete(It.IsAny<ProjectMember>()),
-                Times.Never);
-
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _projectMemberRepositoryMock.Verify(r => r.CountManagersAsync(It.IsAny<Guid>()), Times.Never);
+            _issueRepositoryMock.Verify(r => r.GetByProjectAndAssigneeAsync(It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
+            _projectMemberRepositoryMock.Verify(r => r.Delete(It.IsAny<ProjectMember>()), Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -828,20 +783,12 @@ namespace BugTracker.UnitTests.Services
             Func<Task> act = () => _sut.RemoveMemberAsync(projectId, userId);
 
             // Assert
-            await act.Should()
-                .ThrowAsync<BusinessRuleException>();
+            await act.Should().ThrowAsync<BusinessRuleException>();
 
-            _issueRepositoryMock.Verify(
-                r => r.GetByProjectAndAssigneeAsync(It.IsAny<Guid>(), It.IsAny<Guid>()),
-                Times.Never);
-
-            _projectMemberRepositoryMock.Verify(
-                r => r.Delete(It.IsAny<ProjectMember>()),
-                Times.Never);
-
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Never);
+            _issueRepositoryMock.Verify(r => r.GetByProjectAndAssigneeAsync(It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
+            _projectMemberRepositoryMock.Verify(r => r.Delete(It.IsAny<ProjectMember>()), Times.Never);
+            _auditServiceMock.Verify(a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Never);
         }
 
         [Fact]
@@ -850,6 +797,8 @@ namespace BugTracker.UnitTests.Services
             // Arrange
             var projectId = Guid.NewGuid();
             var userId = Guid.NewGuid();
+            var currentUserId = Guid.NewGuid();
+            const string currentUserEmail = "admin@test.com";
 
             var project = new Project
             {
@@ -881,6 +830,14 @@ namespace BugTracker.UnitTests.Services
                 AssigneeId = userId
             };
 
+            _currentUserServiceMock
+                .SetupGet(c => c.UserId)
+                .Returns(currentUserId);
+
+            _currentUserServiceMock
+                .SetupGet(c => c.Email)
+                .Returns(currentUserEmail);
+
             _projectRepositoryMock
                 .Setup(r => r.GetByIdAsync(projectId))
                 .ReturnsAsync(project);
@@ -900,14 +857,24 @@ namespace BugTracker.UnitTests.Services
             issue1.AssigneeId.Should().BeNull();
             issue2.AssigneeId.Should().BeNull();
 
-            _projectMemberRepositoryMock.Verify(
-                r => r.Delete(member),
+            _projectMemberRepositoryMock.Verify(r => r.Delete(member), Times.Once);
+
+            _auditServiceMock.Verify(a => a.LogAsync(
+                It.Is<CreateAuditLogDto>(d =>
+                    d.UserId == currentUserId &&
+                    d.UserEmail == currentUserEmail &&
+                    d.Action == AuditAction.ProjectMemberRemoved &&
+                    d.EntityName == nameof(ProjectMember) &&
+                    d.EntityId == $"{projectId}:{userId}" &&
+                    d.Details != null &&
+                    d.Details.Contains("Retrait de l'utilisateur")),
+                It.IsAny<CancellationToken>()),
                 Times.Once);
 
-            _unitOfWorkMock.Verify(
-                u => u.SaveChangesAsync(),
-                Times.Once);
+            _unitOfWorkMock.Verify(u => u.SaveChangesAsync(), Times.Once);
         }
+
+        // ==================== GETTERS ====================
 
         [Fact]
         public async Task GetMembersAsync_WhenProjectDoesNotExist_ShouldThrowNotFoundException()
@@ -923,12 +890,9 @@ namespace BugTracker.UnitTests.Services
             Func<Task> act = () => _sut.GetMembersAsync(projectId);
 
             // Assert
-            await act.Should()
-                .ThrowAsync<NotFoundException>();
+            await act.Should().ThrowAsync<NotFoundException>();
 
-            _projectMemberRepositoryMock.Verify(
-                r => r.GetByProjectIdAsync(It.IsAny<Guid>()),
-                Times.Never);
+            _projectMemberRepositoryMock.Verify(r => r.GetByProjectIdAsync(It.IsAny<Guid>()), Times.Never);
         }
 
         [Fact]
@@ -960,22 +924,22 @@ namespace BugTracker.UnitTests.Services
             };
 
             var members = new List<ProjectMember>
+            {
+                new ProjectMember
                 {
-                    new ProjectMember
-                    {
-                        ProjectId = projectId,
-                        UserId = user1.Id,
-                        Role = ProjectRole.Developer,
-                        User = user1
-                    },
-                    new ProjectMember
-                    {
-                        ProjectId = projectId,
-                        UserId = user2.Id,
-                        Role = ProjectRole.QA,
-                        User = user2
-                    }
-                };
+                    ProjectId = projectId,
+                    UserId = user1.Id,
+                    Role = ProjectRole.Developer,
+                    User = user1
+                },
+                new ProjectMember
+                {
+                    ProjectId = projectId,
+                    UserId = user2.Id,
+                    Role = ProjectRole.QA,
+                    User = user2
+                }
+            };
 
             _projectRepositoryMock
                 .Setup(r => r.GetByIdAsync(projectId))
@@ -990,13 +954,10 @@ namespace BugTracker.UnitTests.Services
 
             // Assert
             result.Should().HaveCount(2);
-
             result.Should().Contain(m => m.UserId == user1.Id && m.Role == ProjectRole.Developer);
             result.Should().Contain(m => m.UserId == user2.Id && m.Role == ProjectRole.QA);
 
-            _projectMemberRepositoryMock.Verify(
-                r => r.GetByProjectIdAsync(projectId),
-                Times.Once);
+            _projectMemberRepositoryMock.Verify(r => r.GetByProjectIdAsync(projectId), Times.Once);
         }
 
         [Fact]
@@ -1030,15 +991,12 @@ namespace BugTracker.UnitTests.Services
 
             // Assert
             result.Should().NotBeNull();
-
             result!.UserId.Should().Be(userId);
             result.Username.Should().Be("dev1");
             result.FullName.Should().Be("Developer One");
             result.Role.Should().Be(ProjectRole.Developer);
 
-            _projectMemberRepositoryMock.Verify(
-                r => r.GetByProjectAndUserAsync(projectId, userId),
-                Times.Once);
+            _projectMemberRepositoryMock.Verify(r => r.GetByProjectAndUserAsync(projectId, userId), Times.Once);
         }
 
         [Fact]
@@ -1130,6 +1088,5 @@ namespace BugTracker.UnitTests.Services
                 r => r.IsManagerAsync(projectId, userId),
                 Times.Once);
         }
-
     }
 }
