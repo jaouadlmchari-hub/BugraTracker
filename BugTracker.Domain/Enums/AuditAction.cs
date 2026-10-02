@@ -80,14 +80,15 @@ public enum AuditAction
     IssueStatusChanged = 63,
     IssuePriorityChanged = 64,
     IssueTypeChanged = 65,
+    IssueStoryPointsChanged = 66,
 
-    IssueAssigned = 66,
-    IssueUnassigned = 67,
+    IssueAssigned = 67,
+    IssueUnassigned = 68,
 
-    IssueEpicChanged = 68,
-    IssueSprintChanged = 69,
+    IssueEpicChanged = 69,
+    IssueSprintChanged = 70,
 
-    IssueDueDateChanged = 70,
+    IssueDueDateChanged = 71,
 
 
     // =========================
