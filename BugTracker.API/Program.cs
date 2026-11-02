@@ -30,6 +30,8 @@ public class Program
         builder.Services.AddJwtBearerAuthentication(builder.Configuration);
         builder.Services.AddAuthorizationPolicies();
 
+        builder.Services.AddBugTrackerRateLimiting();
+
         builder.Services.AddCors(options =>
         {
             options.AddPolicy("FrontendCorsPolicy", policy =>
@@ -83,6 +85,8 @@ public class Program
 
         app.UseMiddleware<GlobalExceptionMiddleware>();
 
+        app.UseMiddleware<SecurityHeadersMiddleware>();
+
         if (app.Environment.IsDevelopment())
         {
             await app.Services.UseDatabaseSeederAsync();
@@ -97,6 +101,8 @@ public class Program
 
         app.UseAuthentication();
         app.UseAuthorization();
+
+        app.UseRateLimiter();
 
         app.MapControllers();
 
