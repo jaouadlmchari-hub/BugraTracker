@@ -1,6 +1,7 @@
 ﻿using BugTracker.Application.DTOs.Attachments;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 [Authorize]
 [ApiController]
@@ -88,6 +89,7 @@ public class AttachmentsController : ControllerBase
 
 
     [HttpPost("/api/issues/{issueId:guid}/attachments")]
+    [EnableRateLimiting("upload")]
     [Consumes("multipart/form-data")]
     [ProducesResponseType(typeof(AttachmentDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

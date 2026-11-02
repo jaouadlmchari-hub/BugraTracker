@@ -2,6 +2,7 @@
 using BugTracker.Application.Interfaces.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace BugTracker.API.Controllers
 {
@@ -17,6 +18,7 @@ namespace BugTracker.API.Controllers
         }
 
         [HttpPost("login")]
+        [EnableRateLimiting("auth")]
         [AllowAnonymous]
         [ProducesResponseType(typeof(AuthResponseDto), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -28,6 +30,7 @@ namespace BugTracker.API.Controllers
 
 
         [HttpPost("refresh")]
+        [EnableRateLimiting("auth")]
         [AllowAnonymous]
         [ProducesResponseType(typeof(AuthResponseDto), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
