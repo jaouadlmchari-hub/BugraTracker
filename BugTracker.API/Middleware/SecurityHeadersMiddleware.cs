@@ -20,8 +20,8 @@ public class SecurityHeadersMiddleware
         headers["Permissions-Policy"] =
             "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()";
 
-        headers["Content-Security-Policy"] =
-            "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+        //headers["Content-Security-Policy"] =
+        //    "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 
         if (!context.Request.Host.Host.Contains("localhost", StringComparison.OrdinalIgnoreCase) &&
             context.Request.IsHttps)

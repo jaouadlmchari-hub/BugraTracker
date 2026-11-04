@@ -31,6 +31,8 @@ public class Program
         builder.Services.AddAuthorizationPolicies();
 
         builder.Services.AddBugTrackerRateLimiting();
+        builder.Services.AddBugTrackerHealthChecks(builder.Configuration);
+        builder.Services.AddBugTrackerOpenTelemetry(builder.Configuration,builder.Environment);
 
         builder.Services.AddCors(options =>
         {
@@ -84,7 +86,6 @@ public class Program
         var app = builder.Build();
 
         app.UseMiddleware<GlobalExceptionMiddleware>();
-
         app.UseMiddleware<SecurityHeadersMiddleware>();
 
         if (app.Environment.IsDevelopment())
@@ -96,13 +97,14 @@ public class Program
         }
 
         app.UseHttpsRedirection();
-
         app.UseCors("FrontendCorsPolicy");
 
         app.UseAuthentication();
         app.UseAuthorization();
 
         app.UseRateLimiter();
+
+        app.UseBugTrackerHealthChecks();
 
         app.MapControllers();
 
