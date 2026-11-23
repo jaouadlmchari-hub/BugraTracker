@@ -24,6 +24,8 @@ namespace BugTracker.UnitTests.Services
         private readonly Mock<ICurrentUserService> _currentUserServiceMock;
         private readonly Mock<IAuditService> _auditServiceMock;
         private readonly Mock<ILogger<ProjectService>> _loggerMock;
+        private readonly Mock<ICacheService> _cacheServiceMock;
+
         private readonly ProjectService _sut;
 
         public ProjectServiceTests()
@@ -34,6 +36,7 @@ namespace BugTracker.UnitTests.Services
             _currentUserServiceMock = new Mock<ICurrentUserService>();
             _auditServiceMock = new Mock<IAuditService>();
             _loggerMock = new Mock<ILogger<ProjectService>>();
+            _cacheServiceMock = new Mock<ICacheService>();
 
             _unitOfWorkMock
                 .SetupGet(u => u.Projects)
@@ -44,10 +47,11 @@ namespace BugTracker.UnitTests.Services
                 .Returns(_userRepositoryMock.Object);
 
             _sut = new ProjectService(
-                _unitOfWorkMock.Object,
-                _currentUserServiceMock.Object,
-                _auditServiceMock.Object,
-                _loggerMock.Object);
+                 _unitOfWorkMock.Object,
+                 _currentUserServiceMock.Object,
+                 _auditServiceMock.Object,
+                 _cacheServiceMock.Object,
+                 _loggerMock.Object);
         }
 
         // ==================== CREATE ====================
@@ -835,6 +839,7 @@ namespace BugTracker.UnitTests.Services
             result.Should().BeNull();
         }
 
+
         [Theory]
         [InlineData(false)]
         [InlineData(true)]
@@ -842,6 +847,7 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var userId = Guid.NewGuid();
+
             var filter = new ProjectFilterDto
             {
                 PageNumber = 2,
@@ -849,22 +855,22 @@ namespace BugTracker.UnitTests.Services
             };
 
             var projects = new List<Project>
-            {
-                new Project
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "BugTracker",
-                    Key = "BUG",
-                    Status = ProjectStatus.Active
-                },
-                new Project
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "LOMS",
-                    Key = "LOMS",
-                    Status = ProjectStatus.Active
-                }
-            };
+               {
+                   new Project
+                   {
+                       Id = Guid.NewGuid(),
+                       Name = "BugTracker",
+                       Key = "BUG",
+                       Status = ProjectStatus.Active
+                   },
+                   new Project
+                   {
+                       Id = Guid.NewGuid(),
+                       Name = "LOMS",
+                       Key = "LOMS",
+                       Status = ProjectStatus.Active
+                   }
+               };
 
             const int totalCount = 25;
 
@@ -875,6 +881,11 @@ namespace BugTracker.UnitTests.Services
             _currentUserServiceMock
                 .SetupGet(c => c.IsAdmin)
                 .Returns(isAdmin);
+
+            _cacheServiceMock
+                .Setup(c => c.GetAsync<PagedResultDto<ProjectDto>>(
+                    It.IsAny<string>()))
+                .ReturnsAsync((PagedResultDto<ProjectDto>?)null);
 
             _projectRepositoryMock
                 .Setup(r => r.GetPaginatedAsync(filter, userId, isAdmin))
@@ -894,6 +905,95 @@ namespace BugTracker.UnitTests.Services
             _projectRepositoryMock.Verify(
                 r => r.GetPaginatedAsync(filter, userId, isAdmin),
                 Times.Once);
+
+            _cacheServiceMock.Verify(
+                c => c.SetAsync(
+                    It.IsAny<string>(),
+                    It.Is<PagedResultDto<ProjectDto>>(cached =>
+                        cached.TotalCount == totalCount &&
+                        cached.Items.Count == 2),
+                    It.IsAny<TimeSpan?>()),
+                Times.Once);
         }
+
+
+        [Fact]
+        public async Task GetAllPaginatedAsync_ShouldReturnCachedProjects_WhenCacheHit()
+        {
+            // Arrange
+            var userId = Guid.NewGuid();
+
+            var filter = new ProjectFilterDto
+            {
+                PageNumber = 1,
+                PageSize = 10,
+                Search = null,
+                Status = null
+            };
+
+            var cachedResult = new PagedResultDto<ProjectDto>
+            {
+                Items = new List<ProjectDto>
+                       {
+                           new ProjectDto
+                           {
+                               Id = Guid.NewGuid(),
+                               Name = "BugTracker",
+                               Key = "BUG",
+                               Status = ProjectStatus.Active
+                           },
+                           new ProjectDto
+                           {
+                               Id = Guid.NewGuid(),
+                               Name = "LOMS",
+                               Key = "LOMS",
+                               Status = ProjectStatus.Active
+                           }
+                       },
+                TotalCount = 2,
+                PageNumber = 1,
+                PageSize = 10
+            };
+
+            _currentUserServiceMock
+                .SetupGet(c => c.UserId)
+                .Returns(userId);
+
+            _currentUserServiceMock
+                .SetupGet(c => c.IsAdmin)
+                .Returns(false);
+
+            _cacheServiceMock
+                .Setup(c => c.GetAsync<PagedResultDto<ProjectDto>>(
+                    It.IsAny<string>()))
+                .ReturnsAsync(cachedResult);
+
+            // Act
+            var result = await _sut.GetAllPaginatedAsync(filter);
+
+            // Assert
+            result.Should().BeSameAs(cachedResult);
+
+            result.Items.Should().HaveCount(2);
+            result.TotalCount.Should().Be(2);
+
+            // Repository must not be called when cache contains the result
+            _projectRepositoryMock.Verify(
+                r => r.GetPaginatedAsync(
+                    It.IsAny<ProjectFilterDto>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<bool>()),
+                Times.Never);
+
+            // Cache must not be updated again
+            _cacheServiceMock.Verify(
+                c => c.SetAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<PagedResultDto<ProjectDto>>(),
+                    It.IsAny<TimeSpan?>()),
+                Times.Never);
+        }
+
+
     }
 }
