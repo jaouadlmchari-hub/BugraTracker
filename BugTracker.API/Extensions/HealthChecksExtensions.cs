@@ -1,4 +1,5 @@
-﻿using HealthChecks.UI.Client;
+﻿
+using HealthChecks.UI.Client;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
@@ -10,7 +11,9 @@ public static class HealthChecksExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        var connectionString = configuration.GetConnectionString("DefaultConnection");
+        // SQL Server connection
+        var connectionString =
+            configuration.GetConnectionString("DefaultConnection");
 
         if (string.IsNullOrWhiteSpace(connectionString))
         {
@@ -18,38 +21,63 @@ public static class HealthChecksExtensions
                 "Connection string 'DefaultConnection' is missing.");
         }
 
+        // Redis connection
+        var redisConnection =
+            configuration.GetConnectionString("Redis");
+
+        if (string.IsNullOrWhiteSpace(redisConnection))
+        {
+            redisConnection = configuration["Redis:Configuration"];
+        }
+
+        if (string.IsNullOrWhiteSpace(redisConnection))
+        {
+            redisConnection = "localhost:6379";
+        }
+
         services.AddHealthChecks()
-            // Liveness : l'API tourne
-            .AddCheck("self", () => HealthCheckResult.Healthy(), tags: new[] { "live" })
 
-            // Readiness : SQL Server accessible
+            // Liveness : API is running
+            .AddCheck(
+                "self",
+                () => HealthCheckResult.Healthy(),
+                tags: new[] { "live" })
+
+            // Readiness : SQL Server is accessible
             .AddSqlServer(
-
-                connectionString: connectionString ?? string.Empty,
+                connectionString: connectionString,
                 name: "sqlserver",
+                failureStatus: HealthStatus.Unhealthy,
+                tags: new[] { "ready" })
+
+            // Readiness : Redis is accessible
+            .AddRedis(
+                redisConnectionString: redisConnection,
+                name: "redis",
                 failureStatus: HealthStatus.Unhealthy,
                 tags: new[] { "ready" });
 
         return services;
     }
 
-    public static IApplicationBuilder UseBugTrackerHealthChecks(this IApplicationBuilder app)
+    public static IApplicationBuilder UseBugTrackerHealthChecks(
+        this IApplicationBuilder app)
     {
-        // /health/live  → process up
+        // /health/live → API process is running
         app.UseHealthChecks("/health/live", new HealthCheckOptions
         {
             Predicate = check => check.Tags.Contains("live"),
             ResponseWriter = UIResponseWriter.WriteHealthCheckUIResponse
         });
 
-        // /health/ready → dépendances OK (SQL, etc.)
+        // /health/ready → SQL Server + Redis are accessible
         app.UseHealthChecks("/health/ready", new HealthCheckOptions
         {
             Predicate = check => check.Tags.Contains("ready"),
             ResponseWriter = UIResponseWriter.WriteHealthCheckUIResponse
         });
 
-        // /health → tout
+        // /health → all health checks
         app.UseHealthChecks("/health", new HealthCheckOptions
         {
             ResponseWriter = UIResponseWriter.WriteHealthCheckUIResponse

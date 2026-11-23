@@ -30,7 +30,11 @@ public class Program
         builder.Services.AddJwtBearerAuthentication(builder.Configuration);
         builder.Services.AddAuthorizationPolicies();
 
-        builder.Services.AddBugTrackerRateLimiting();
+        if (!builder.Configuration.GetValue<bool>(
+        "PerformanceTesting:DisableRateLimiting"))
+        {
+            builder.Services.AddBugTrackerRateLimiting();
+        }
         builder.Services.AddBugTrackerHealthChecks(builder.Configuration);
         builder.Services.AddBugTrackerOpenTelemetry(builder.Configuration,builder.Environment);
 
@@ -85,6 +89,9 @@ public class Program
 
         var app = builder.Build();
 
+        var rateLimitingEnabled = !builder.Configuration.GetValue<bool>(
+                                  "PerformanceTesting:DisableRateLimiting");
+
         app.UseMiddleware<GlobalExceptionMiddleware>();
         app.UseMiddleware<SecurityHeadersMiddleware>();
 
@@ -102,7 +109,10 @@ public class Program
         app.UseAuthentication();
         app.UseAuthorization();
 
-        app.UseRateLimiter();
+        if (rateLimitingEnabled)
+        {
+            app.UseRateLimiter();
+        }
 
         app.UseBugTrackerHealthChecks();
 

@@ -37,6 +37,7 @@ public static class DependencyInjection
         services.AddScoped<IActivityLogRepository, ActivityLogRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
+        services.AddScoped<ICacheService, RedisCacheService>();
 
         // Unit Of Work
         services.AddScoped<IUnitOfWork, UnitOfWork>();
@@ -49,6 +50,9 @@ public static class DependencyInjection
 
         // S3 / MinIO
         services.AddS3Storage(configuration);
+
+        // Redis distributed cache
+        services.AddRedisCache(configuration);
 
         // JWT / RefrechToken
         services.AddAuthenticationServices(configuration);
