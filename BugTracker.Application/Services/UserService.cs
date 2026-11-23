@@ -121,6 +121,10 @@ namespace BugTracker.Application.Services
 
             await _unitOfWork.Users.AddAsync(user);
 
+          
+
+            await _unitOfWork.SaveChangesAsync();
+
             //  Audit : UserCreated (10)
             await _auditService.LogAsync(new CreateAuditLogDto(
                 UserId: user.Id,
@@ -130,8 +134,6 @@ namespace BugTracker.Application.Services
                 EntityId: user.Id.ToString(),
                 Details: $"Création du compte utilisateur '{user.Username}'"
             ));
-
-            await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation(
                 "User {UserId} created successfully with username {Username}",

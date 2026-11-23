@@ -18,16 +18,20 @@ namespace BugTracker.Application.Services
         private readonly ICurrentUserService _currentUserService;
         private readonly IAuditService _auditService;
         private readonly ILogger<ProjectService> _logger;
+        private readonly ICacheService _cacheService;
+
 
         public ProjectService(
-            IUnitOfWork unitOfWork,
-            ICurrentUserService currentUserService,
-            IAuditService auditService,
-            ILogger<ProjectService> logger)
+               IUnitOfWork unitOfWork,
+               ICurrentUserService currentUserService,
+               IAuditService auditService,
+               ICacheService cacheService,
+               ILogger<ProjectService> logger)
         {
             _unitOfWork = unitOfWork;
             _currentUserService = currentUserService;
             _auditService = auditService;
+            _cacheService = cacheService;
             _logger = logger;
         }
 
@@ -78,8 +82,26 @@ namespace BugTracker.Application.Services
             var userId = _currentUserService.UserId;
             var isAdmin = _currentUserService.IsAdmin;
 
+            // 1. Generate a unique cache key for the current user and filters
+            var cacheKey =
+             $"projects:{userId}:{isAdmin}:{filter.PageNumber}:{filter.PageSize}:{filter.Search}:{filter.Status}";
+
+            // 2. Try to retrieve the result from Redis
+            var cachedResult =
+                await _cacheService.GetAsync<PagedResultDto<ProjectDto>>(cacheKey);
+
+            if (cachedResult != null)
+            {
+                _logger.LogDebug(
+                    "Projects retrieved from cache for user {UserId}.",
+                    userId);
+
+                return cachedResult;
+            }
+
+            // 3. Cache miss: retrieve projects from the database
             _logger.LogDebug(
-                "Retrieving projects. UserId: {UserId}, IsAdmin: {IsAdmin}, Page: {PageNumber}, PageSize: {PageSize}.",
+                "Retrieving projects from database. UserId: {UserId}, IsAdmin: {IsAdmin}, Page: {PageNumber}, PageSize: {PageSize}.",
                 userId,
                 isAdmin,
                 filter.PageNumber,
@@ -91,18 +113,22 @@ namespace BugTracker.Application.Services
                     userId,
                     isAdmin);
 
-            _logger.LogDebug(
-                "Retrieved {ProjectCount} projects out of {TotalCount}.",
-                projects.Count(),
-                totalCount);
-
-            return new PagedResultDto<ProjectDto>
+            // 4. Map entities to DTOs
+            var result = new PagedResultDto<ProjectDto>
             {
                 Items = projects.Select(p => p.ToDto()).ToList(),
                 TotalCount = totalCount,
                 PageNumber = filter.PageNumber,
                 PageSize = filter.PageSize
             };
+
+            // 5. Store the result in Redis for 5 minutes
+            await _cacheService.SetAsync(
+                cacheKey,
+                result,
+                TimeSpan.FromMinutes(5));
+
+            return result;
         }
 
         public async Task<ProjectDto> CreateAsync(CreateProjectDto dto)
