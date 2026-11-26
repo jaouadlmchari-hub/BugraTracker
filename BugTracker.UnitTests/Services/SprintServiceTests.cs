@@ -23,6 +23,8 @@ namespace BugTracker.UnitTests.Services
         private readonly Mock<ICurrentUserService> _currentUserServiceMock;
         private readonly Mock<IAuditService> _auditServiceMock;
         private readonly Mock<ILogger<SprintService>> _loggerMock;
+        private readonly Mock<ICacheService> _cacheServiceMock;
+
         private readonly SprintService _sut;
 
         private readonly Guid _currentUserId = Guid.NewGuid();
@@ -36,14 +38,17 @@ namespace BugTracker.UnitTests.Services
             _issueRepositoryMock = new Mock<IIssueRepository>();
             _currentUserServiceMock = new Mock<ICurrentUserService>();
             _auditServiceMock = new Mock<IAuditService>();
+            _cacheServiceMock = new Mock<ICacheService>();
             _loggerMock = new Mock<ILogger<SprintService>>();
 
             _unitOfWorkMock
                 .SetupGet(u => u.Sprints)
                 .Returns(_sprintRepositoryMock.Object);
+
             _unitOfWorkMock
                 .SetupGet(u => u.Projects)
                 .Returns(_projectRepositoryMock.Object);
+
             _unitOfWorkMock
                 .SetupGet(u => u.Issues)
                 .Returns(_issueRepositoryMock.Object);
@@ -51,6 +56,7 @@ namespace BugTracker.UnitTests.Services
             _currentUserServiceMock
                 .SetupGet(c => c.UserId)
                 .Returns(_currentUserId);
+
             _currentUserServiceMock
                 .SetupGet(c => c.Email)
                 .Returns(CurrentUserEmail);
@@ -59,9 +65,9 @@ namespace BugTracker.UnitTests.Services
                 _unitOfWorkMock.Object,
                 _currentUserServiceMock.Object,
                 _auditServiceMock.Object,
+                _cacheServiceMock.Object,
                 _loggerMock.Object);
         }
-
         // ───────────────────────── StartAsync ─────────────────────────
 
         [Fact]
@@ -836,30 +842,41 @@ namespace BugTracker.UnitTests.Services
         {
             // Arrange
             var projectId = Guid.NewGuid();
+
             var sprints = new List<Sprint>
-            {
-                new Sprint
                 {
-                    Id = Guid.NewGuid(),
-                    ProjectId = projectId,
-                    Name = "Sprint 1",
-                    Status = SprintStatus.Completed
-                },
-                new Sprint
-                {
-                    Id = Guid.NewGuid(),
-                    ProjectId = projectId,
-                    Name = "Sprint 2",
-                    Status = SprintStatus.Planning
-                }
-            };
+                    new Sprint
+                    {
+                        Id = Guid.NewGuid(),
+                        ProjectId = projectId,
+                        Name = "Sprint 1",
+                        Status = SprintStatus.Completed
+                    },
+                    new Sprint
+                    {
+                        Id = Guid.NewGuid(),
+                        ProjectId = projectId,
+                        Name = "Sprint 2",
+                        Status = SprintStatus.Planning
+                    }
+                };
+
+            _projectRepositoryMock
+                .Setup(r => r.ExistsAsync(projectId))
+                .ReturnsAsync(true);
+
+            // Cache Miss
+            _cacheServiceMock
+                .Setup(c => c.GetAsync<List<SprintDto>>(
+                    It.IsAny<string>()))
+                .ReturnsAsync((List<SprintDto>?)null);
 
             _sprintRepositoryMock
                 .Setup(r => r.GetByProjectIdAsync(projectId))
                 .ReturnsAsync(sprints);
 
             // Act
-            var result = await _sut.GetAllByProjectAsync(projectId);
+            var result = (await _sut.GetAllByProjectAsync(projectId)).ToList();
 
             // Assert
             result.Should().HaveCount(2);
@@ -870,10 +887,78 @@ namespace BugTracker.UnitTests.Services
                 r => r.GetByProjectIdAsync(projectId),
                 Times.Once);
 
-            _auditServiceMock.Verify(
-             a => a.LogAsync(It.IsAny<CreateAuditLogDto>(), It.IsAny<CancellationToken>()),
-             Times.Never);
+            _cacheServiceMock.Verify(
+                c => c.SetAsync(
+                    It.IsAny<string>(),
+                    It.Is<List<SprintDto>>(cached => cached.Count == 2),
+                    It.IsAny<TimeSpan?>()),
+                Times.Once);
 
+            _auditServiceMock.Verify(
+                a => a.LogAsync(
+                    It.IsAny<CreateAuditLogDto>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+
+        [Fact]
+        public async Task GetAllByProjectAsync_ShouldReturnCachedSprints_WhenCacheHit()
+        {
+            // Arrange
+            var projectId = Guid.NewGuid();
+
+            var cachedSprints = new List<SprintDto>
+                {
+                    new SprintDto
+                    {
+                        Id = Guid.NewGuid(),
+                        Name = "Cached Sprint 1"
+                    },
+                    new SprintDto
+                    {
+                        Id = Guid.NewGuid(),
+                        Name = "Cached Sprint 2"
+                    }
+                };
+
+            _projectRepositoryMock
+                .Setup(r => r.ExistsAsync(projectId))
+                .ReturnsAsync(true);
+
+            _cacheServiceMock
+                .Setup(c => c.GetAsync<List<SprintDto>>(
+                    It.IsAny<string>()))
+                .ReturnsAsync(cachedSprints);
+
+            // Act
+            var result = (await _sut.GetAllByProjectAsync(projectId)).ToList();
+
+            // Assert
+            result.Should().HaveCount(2);
+            result.Should().Contain(s => s.Name == "Cached Sprint 1");
+            result.Should().Contain(s => s.Name == "Cached Sprint 2");
+
+            _sprintRepositoryMock.Verify(
+                r => r.GetByProjectIdAsync(projectId),
+                Times.Never);
+
+            _cacheServiceMock.Verify(
+                c => c.GetAsync<List<SprintDto>>(
+                    It.IsAny<string>()),
+                Times.Once);
+
+            _cacheServiceMock.Verify(
+                c => c.SetAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<List<SprintDto>>(),
+                    It.IsAny<TimeSpan?>()),
+                Times.Never);
+
+            _auditServiceMock.Verify(
+                a => a.LogAsync(
+                    It.IsAny<CreateAuditLogDto>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Never);
         }
     }
 }

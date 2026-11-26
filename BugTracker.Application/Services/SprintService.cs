@@ -17,16 +17,20 @@ namespace BugTracker.Application.Services
         private readonly ICurrentUserService _currentUserService;
         private readonly IAuditService _auditService;
         private readonly ILogger<SprintService> _logger;
+        private readonly ICacheService _cacheService;
+
 
         public SprintService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUserService,
             IAuditService auditService,
+             ICacheService cacheService,
             ILogger<SprintService> logger)
         {
             _unitOfWork = unitOfWork;
             _currentUserService = currentUserService;
             _auditService = auditService;
+            _cacheService = cacheService;
             _logger = logger;
         }
 
@@ -57,19 +61,56 @@ namespace BugTracker.Application.Services
                 "Retrieving sprints for project {ProjectId}.",
                 projectId);
 
+            // 1. Vérifier l'existence du projet
+            var projectExists =
+                await _unitOfWork.Projects.ExistsAsync(projectId);
+
+            if (!projectExists)
+            {
+                _logger.LogWarning(
+                    "Project not found while retrieving sprints. ProjectId: {ProjectId}",
+                    projectId);
+
+                throw new NotFoundException("Projet introuvable.");
+            }
+
+            // 2. Construire la clé Redis
+            var cacheKey = $"sprints:project:{projectId}";
+
+            // 3. Vérifier le cache
+            var cachedSprints =
+                await _cacheService.GetAsync<List<SprintDto>>(cacheKey);
+
+            if (cachedSprints != null)
+            {
+                _logger.LogDebug(
+                    "Sprints retrieved from cache. ProjectId: {ProjectId}",
+                    projectId);
+
+                return cachedSprints;
+            }
+
+            // 4. Cache Miss : récupérer les données depuis SQL Server
             var sprints = await _unitOfWork.Sprints
                 .GetByProjectIdAsync(projectId);
 
-            _logger.LogDebug(
-                "Retrieved {SprintCount} sprints for project {ProjectId}.",
-                sprints.Count(),
-                projectId);
-
-            return sprints
+            var result = sprints
                 .Select(s => s.ToDto())
                 .ToList();
-        }
 
+            // 5. Enregistrer dans Redis pendant 5 minutes
+            await _cacheService.SetAsync(
+                cacheKey,
+                result,
+                TimeSpan.FromMinutes(5));
+
+            _logger.LogDebug(
+                "Retrieved {SprintCount} sprints for project {ProjectId}.",
+                result.Count,
+                projectId);
+
+            return result;
+        }
         public async Task<SprintDto> CreateAsync(Guid projectId,CreateSprintDto dto)
         {
             _logger.LogInformation(

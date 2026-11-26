@@ -19,18 +19,21 @@ namespace BugTracker.Application.Services
         private readonly IActivityLogService _activityLogService;
         private readonly IAuditService _auditService;
         private readonly ILogger<IssueService> _logger;
+        private readonly ICacheService _cacheService;
 
         public IssueService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUserService,
             IActivityLogService activityLogService,
             IAuditService auditService,
+             ICacheService cacheService,
             ILogger<IssueService> logger)
         {
             _unitOfWork = unitOfWork;
             _currentUserService = currentUserService;
             _activityLogService = activityLogService;
             _auditService = auditService;
+            _cacheService = cacheService;
             _logger = logger;
         }
 
@@ -55,14 +58,17 @@ namespace BugTracker.Application.Services
             return issue.ToDto();
         }
 
-        public async Task<PagedResultDto<IssueDto>> GetByProjectPaginatedAsync(Guid projectId,IssueFilterDto filter)
+        public async Task<PagedResultDto<IssueDto>> GetByProjectPaginatedAsync(Guid projectId, IssueFilterDto filter)
         {
+            var userId = _currentUserService.UserId;
+
             _logger.LogDebug(
                 "Getting paginated issues. ProjectId: {ProjectId}, PageNumber: {PageNumber}, PageSize: {PageSize}",
                 projectId,
                 filter.PageNumber,
                 filter.PageSize);
 
+            // 1. Check whether the project exists
             var projectExists =
                 await _unitOfWork.Projects.ExistsAsync(projectId);
 
@@ -75,12 +81,31 @@ namespace BugTracker.Application.Services
                 throw new NotFoundException("Projet introuvable.");
             }
 
+            // 2. Generate cache key
+            var cacheKey =
+                $"issues:project:{projectId}:user:{userId}:page:{filter.PageNumber}:size:{filter.PageSize}";
+
+            // 3. Try to retrieve data from Redis
+            var cachedResult =
+                await _cacheService.GetAsync<PagedResultDto<IssueDto>>(cacheKey);
+
+            if (cachedResult != null)
+            {
+                _logger.LogDebug(
+                    "Issues retrieved from cache. ProjectId: {ProjectId}, UserId: {UserId}",
+                    projectId,
+                    userId);
+
+                return cachedResult;
+            }
+
+            // 4. Cache Miss: retrieve data from database
             var (issues, totalCount) =
                 await _unitOfWork.Issues.GetPaginatedAsync(
                     projectId,
                     filter);
 
-            return new PagedResultDto<IssueDto>
+            var result = new PagedResultDto<IssueDto>
             {
                 Items = issues
                     .Select(i => i.ToDto())
@@ -90,6 +115,14 @@ namespace BugTracker.Application.Services
                 PageNumber = filter.PageNumber,
                 PageSize = filter.PageSize
             };
+
+            // 5. Store result in Redis for 5 minutes
+            await _cacheService.SetAsync(
+                cacheKey,
+                result,
+                TimeSpan.FromMinutes(5));
+
+            return result;
         }
 
         private async Task ValidateEpicAsync(Guid projectId, Guid epicId)

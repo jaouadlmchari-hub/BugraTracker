@@ -1,4 +1,5 @@
-﻿using BugTracker.Application.DTOs.Issues;
+﻿using BugTracker.Application.DTOs.Common;
+using BugTracker.Application.DTOs.Issues;
 using BugTracker.Domain.Entities;
 using BugTracker.Domain.Enums;
 using FluentAssertions;
@@ -77,32 +78,38 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
             };
 
             var issues = new List<Issue>
-            {
-                new Issue
                 {
-                    Id = Guid.NewGuid(),
-                    ProjectId = projectId,
-                    Title = "Login bug",
-                    Type = IssueType.Bug,
-                    Status = IssueStatus.Todo,
-                    Priority = Priority.High
-                },
-                new Issue
-                {
-                    Id = Guid.NewGuid(),
-                    ProjectId = projectId,
-                    Title = "Create dashboard",
-                    Type = IssueType.Task,
-                    Status = IssueStatus.InProgress,
-                    Priority = Priority.Medium
-                }
-            };
+                    new Issue
+                    {
+                        Id = Guid.NewGuid(),
+                        ProjectId = projectId,
+                        Title = "Login bug",
+                        Type = IssueType.Bug,
+                        Status = IssueStatus.Todo,
+                        Priority = Priority.High
+                    },
+                    new Issue
+                    {
+                        Id = Guid.NewGuid(),
+                        ProjectId = projectId,
+                        Title = "Create dashboard",
+                        Type = IssueType.Task,
+                        Status = IssueStatus.InProgress,
+                        Priority = Priority.Medium
+                    }
+                };
 
             const int totalCount = 25;
 
             ProjectRepositoryMock
                 .Setup(r => r.ExistsAsync(projectId))
                 .ReturnsAsync(true);
+
+            // Cache Miss
+            CacheServiceMock
+                .Setup(c => c.GetAsync<PagedResultDto<IssueDto>>(
+                    It.IsAny<string>()))
+                .ReturnsAsync((PagedResultDto<IssueDto>?)null);
 
             IssueRepositoryMock
                 .Setup(r => r.GetPaginatedAsync(projectId, filter))
@@ -119,7 +126,94 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
             result.PageNumber.Should().Be(2);
             result.PageSize.Should().Be(10);
 
-            IssueRepositoryMock.Verify(r => r.GetPaginatedAsync(projectId, filter), Times.Once);
+            // Repository called once
+            IssueRepositoryMock.Verify(
+                r => r.GetPaginatedAsync(projectId, filter),
+                Times.Once);
+
+            // Result stored in cache
+            CacheServiceMock.Verify(
+                c => c.SetAsync(
+                    It.IsAny<string>(),
+                    It.Is<PagedResultDto<IssueDto>>(cached =>
+                        cached.TotalCount == totalCount &&
+                        cached.Items.Count == 2),
+                    It.IsAny<TimeSpan?>()),
+                Times.Once);
         }
+
+        [Fact]
+        public async Task GetByProjectPaginatedAsync_ShouldReturnCachedIssues_WhenCacheHit()
+        {
+            // Arrange
+            var projectId = Guid.NewGuid();
+
+            var filter = new IssueFilterDto
+            {
+                PageNumber = 2,
+                PageSize = 10
+            };
+
+            var cachedResult = new PagedResultDto<IssueDto>
+            {
+                Items = new List<IssueDto>
+                       {
+                           new IssueDto
+                           {
+                               Id = Guid.NewGuid(),
+                               Title = "Cached login bug"
+                           },
+                           new IssueDto
+                           {
+                               Id = Guid.NewGuid(),
+                               Title = "Cached dashboard task"
+                           }
+                       },
+                TotalCount = 25,
+                PageNumber = 2,
+                PageSize = 10
+            };
+
+            ProjectRepositoryMock
+                .Setup(r => r.ExistsAsync(projectId))
+                .ReturnsAsync(true);
+
+            // Cache Hit : Redis retourne les données déjà enregistrées.
+            CacheServiceMock
+                .Setup(c => c.GetAsync<PagedResultDto<IssueDto>>(
+                    It.IsAny<string>()))
+                .ReturnsAsync(cachedResult);
+
+            // Act
+            var result = await Sut.GetByProjectPaginatedAsync(projectId, filter);
+
+            // Assert
+            result.Should().BeSameAs(cachedResult);
+
+            result.Items.Should().HaveCount(2);
+            result.Items.Should().Contain(i => i.Title == "Cached login bug");
+            result.Items.Should().Contain(i => i.Title == "Cached dashboard task");
+            result.TotalCount.Should().Be(25);
+
+            // Le repository ne doit pas être appelé.
+            IssueRepositoryMock.Verify(
+                r => r.GetPaginatedAsync(projectId, filter),
+                Times.Never);
+
+            // Le cache doit être consulté une seule fois.
+            CacheServiceMock.Verify(
+                c => c.GetAsync<PagedResultDto<IssueDto>>(
+                    It.IsAny<string>()),
+                Times.Once);
+
+            // Aucun nouvel enregistrement dans le cache.
+            CacheServiceMock.Verify(
+                c => c.SetAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<PagedResultDto<IssueDto>>(),
+                    It.IsAny<TimeSpan?>()),
+                Times.Never);
+        }
+
     }
 }

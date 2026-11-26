@@ -21,10 +21,13 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
         protected readonly Mock<IAuditService> AuditServiceMock;
         protected readonly Mock<ILogger<IssueService>> LoggerMock;
         protected readonly Mock<ITransaction> TransactionMock;
+        protected  Mock<ICacheService> CacheServiceMock { get; private set; } = null!;
+
         protected readonly IssueService Sut;
 
         protected readonly Guid CurrentUserId = Guid.NewGuid();
         protected const string CurrentUserEmail = "test@example.com";
+
 
         protected IssueServiceTestBase()
         {
@@ -37,6 +40,7 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
             CurrentUserServiceMock = new Mock<ICurrentUserService>();
             ActivityLogServiceMock = new Mock<IActivityLogService>();
             AuditServiceMock = new Mock<IAuditService>();
+            CacheServiceMock = new Mock<ICacheService>();
             LoggerMock = new Mock<ILogger<IssueService>>();
             TransactionMock = new Mock<ITransaction>();
 
@@ -55,7 +59,9 @@ namespace BugTracker.UnitTests.Services.IssueServiceTests
                 CurrentUserServiceMock.Object,
                 ActivityLogServiceMock.Object,
                 AuditServiceMock.Object,
+                CacheServiceMock.Object,
                 LoggerMock.Object);
         }
+
     }
 }
